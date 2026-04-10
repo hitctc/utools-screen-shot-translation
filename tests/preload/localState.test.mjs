@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
+import path from 'node:path'
 
 const require = createRequire(import.meta.url)
 const {
@@ -69,4 +70,44 @@ test('normalizePluginSettings preserves supported preview mode and fills missing
       pinPreviewMode: 'side-by-side',
     },
   )
+})
+
+test('services keeps legacy preload methods during the Task 3 to Task 4 transition', () => {
+  const servicesModulePath = path.resolve('public/preload/services.js')
+  delete require.cache[servicesModulePath]
+
+  global.window = {
+    utools: {
+      dbStorage: {
+        getItem() {
+          return null
+        },
+        setItem() {},
+      },
+    },
+  }
+
+  require('../../public/preload/services.js')
+
+  assert.equal(typeof global.window.services.getUiSettings, 'function')
+  assert.equal(typeof global.window.services.saveUiSettings, 'function')
+  assert.equal(typeof global.window.services.getPluginSettings, 'function')
+  assert.equal(typeof global.window.services.savePluginSettings, 'function')
+
+  assert.equal(typeof global.window.services.getBookmarkSettings, 'function')
+  assert.equal(typeof global.window.services.saveBookmarkSettings, 'function')
+  assert.equal(typeof global.window.services.resetBookmarkSettings, 'function')
+  assert.equal(typeof global.window.services.getBookmarkCache, 'function')
+  assert.equal(typeof global.window.services.saveBookmarkCache, 'function')
+  assert.equal(typeof global.window.services.clearBookmarkCache, 'function')
+  assert.equal(typeof global.window.services.getBookmarkUiSettings, 'function')
+  assert.equal(typeof global.window.services.saveBookmarkUiSettings, 'function')
+  assert.equal(typeof global.window.services.getPinnedBookmarks, 'function')
+  assert.equal(typeof global.window.services.togglePinnedBookmarkState, 'function')
+  assert.equal(typeof global.window.services.getRecentOpenedBookmarks, 'function')
+  assert.equal(typeof global.window.services.openBookmarkUrl, 'function')
+  assert.equal(typeof global.window.services.loadChromeBookmarks, 'function')
+
+  delete global.window
+  delete require.cache[servicesModulePath]
 })
