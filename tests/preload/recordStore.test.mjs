@@ -15,7 +15,11 @@ const {
   deleteSavedRecord,
 } = require('../../public/preload/recordStore.cjs')
 
-function createFsMock({ manifestByPath = new Map(), existingPaths = new Set() } = {}) {
+function createFsMock({
+  manifestByPath = new Map(),
+  existingPaths = new Set(),
+  directoryPaths = new Set(),
+} = {}) {
   const writes = []
   const unlinks = []
 
@@ -23,6 +27,27 @@ function createFsMock({ manifestByPath = new Map(), existingPaths = new Set() } 
     fs: {
       existsSync(filePath) {
         return manifestByPath.has(filePath) || existingPaths.has(filePath)
+      },
+      statSync(filePath) {
+        if (directoryPaths.has(filePath)) {
+          return {
+            isDirectory() {
+              return true
+            },
+          }
+        }
+
+        if (manifestByPath.has(filePath) || existingPaths.has(filePath)) {
+          return {
+            isDirectory() {
+              return false
+            },
+          }
+        }
+
+        const error = new Error(`ENOENT: no such file or directory, stat '${filePath}'`)
+        error.code = 'ENOENT'
+        throw error
       },
       promises: {
         async readFile(filePath, encoding) {
@@ -73,6 +98,7 @@ test('reconcileRecords drops entries whose image file is missing', async () => {
 
 test('readRecordManifest returns an empty manifest when the file is missing', async () => {
   const { fs } = createFsMock({
+    directoryPaths: new Set(['/tmp/save']),
     existingPaths: new Set(['/tmp/save']),
   })
 
@@ -87,6 +113,7 @@ test('readRecordManifest returns an empty manifest when the file is missing', as
 
 test('writeRecordManifest sorts records and stamps a fresh updatedAt value', async () => {
   const { fs, writes } = createFsMock({
+    directoryPaths: new Set(['/tmp/save']),
     existingPaths: new Set(['/tmp/save']),
   })
 
@@ -124,6 +151,7 @@ test('listSavedRecords reconciles missing files before returning the manifest', 
         }),
       ],
     ]),
+    directoryPaths: new Set(['/tmp/save']),
     existingPaths: new Set(['/tmp/save', '/tmp/save/b.png']),
   })
 
@@ -154,6 +182,7 @@ test('deleteSavedRecord removes the targeted record and its image file', async (
         }),
       ],
     ]),
+    directoryPaths: new Set(['/tmp/save']),
     existingPaths: new Set(['/tmp/save', '/tmp/save/a.png', '/tmp/save/b.png']),
   })
 
@@ -185,6 +214,7 @@ test('deleteSavedRecord rejects absolute paths outside the save directory', asyn
         }),
       ],
     ]),
+    directoryPaths: new Set(['/tmp/save']),
     existingPaths: new Set(['/tmp/save', '/tmp/outside/a.png']),
   })
 
@@ -215,6 +245,7 @@ test('deleteSavedRecord rejects traversal paths outside the save directory', asy
         }),
       ],
     ]),
+    directoryPaths: new Set(['/tmp/save']),
     existingPaths: new Set(['/tmp/save', path.resolve('/tmp/save', '../escape/a.png')]),
   })
 
@@ -260,6 +291,7 @@ test('deleteSavedRecord surfaces unlink failures other than missing files', asyn
         }),
       ],
     ]),
+    directoryPaths: new Set(['/tmp/save']),
     existingPaths: new Set(['/tmp/save', '/tmp/save/a.png']),
   })
 
@@ -278,4 +310,21 @@ test('deleteSavedRecord surfaces unlink failures other than missing files', asyn
     }),
     (error) => error && error.code === 'EACCES',
   )
+})
+
+test('deleteSavedRecord returns a no-op manifest when saveDirectory points to a file', async () => {
+  const { fs, writes, unlinks } = createFsMock({
+    existingPaths: new Set(['/tmp/save-file']),
+  })
+
+  const result = await deleteSavedRecord({
+    fs,
+    path,
+    settings: { saveDirectory: '/tmp/save-file' },
+    recordId: 'a',
+  })
+
+  assert.deepEqual(result, getEmptyRecordManifest())
+  assert.equal(unlinks.length, 0)
+  assert.equal(writes.length, 0)
 })

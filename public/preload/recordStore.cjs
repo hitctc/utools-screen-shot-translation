@@ -17,7 +17,15 @@ function getEmptyRecordManifest() {
 
 // 目录必须存在才能进行清理或重写，避免把 no-op 变成意外写盘。
 function hasUsableSaveDirectory({ fs, directoryPath }) {
-  return Boolean(directoryPath && typeof directoryPath === 'string' && fs.existsSync(directoryPath))
+  if (!directoryPath || typeof directoryPath !== 'string') {
+    return false
+  }
+
+  try {
+    return fs.statSync(directoryPath).isDirectory()
+  } catch {
+    return false
+  }
 }
 
 // 清单里只认 ISO 时间字符串，越新的记录排在越前面。
