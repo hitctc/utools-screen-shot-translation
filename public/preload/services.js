@@ -4,6 +4,7 @@ const {
   mergePluginSettings,
 } = require('./localState.cjs')
 const { listSavedRecords, deleteSavedRecord } = require('./recordStore.cjs')
+const { runMainWorkflow } = require('./workflow.cjs')
 const fs = require('fs')
 const path = require('path')
 
@@ -39,12 +40,25 @@ function savePluginSettings(partial) {
   return next
 }
 
+// 目前还没有真实 capture / translate / pin / save 实现，这里先挂一层可测试的占位编排。
+function runCaptureTranslationPin() {
+  return runMainWorkflow({
+    settings: getPluginSettings(),
+    captureImage: async () => ({ ok: false, code: 'cancelled' }),
+    translateImage: async () => ({ ok: false, code: 'not-implemented' }),
+    pinImage: async () => ({ ok: false, code: 'not-implemented' }),
+    saveImage: async () => ({ ok: false, code: 'not-implemented' }),
+  })
+}
+
 // preload 只暴露当前截图翻译插件正式保留的本地设置接口。
 window.services = {
+  ...(window.services || {}),
   getUiSettings,
   saveUiSettings,
   getPluginSettings,
   savePluginSettings,
   listSavedRecords: () => listSavedRecords({ fs, path, settings: getPluginSettings() }),
   deleteSavedRecord: (recordId) => deleteSavedRecord({ fs, path, settings: getPluginSettings(), recordId }),
+  runCaptureTranslationPin,
 }

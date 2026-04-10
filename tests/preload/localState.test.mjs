@@ -120,6 +120,7 @@ test('services exposes the plugin settings and record store bridge', () => {
     'getPluginSettings',
     'getUiSettings',
     'listSavedRecords',
+    'runCaptureTranslationPin',
     'savePluginSettings',
     'saveUiSettings',
   ])
@@ -276,6 +277,26 @@ test('savePluginSettings keeps existing save directory when partial value is not
     confirmBeforeDelete: false,
   })
   assert.deepEqual(storage.get('screen-shot-translation-settings'), result)
+
+  cleanup()
+})
+
+test('runCaptureTranslationPin returns save-config-invalid when the persisted save directory is empty', async () => {
+  const { services, cleanup } = loadServicesWithStorage({
+    'screen-shot-translation-settings': {
+      translationMode: 'auto',
+      saveTranslatedImage: true,
+      saveDirectory: '',
+      confirmBeforeDelete: true,
+    },
+  })
+
+  const result = await services.runCaptureTranslationPin()
+
+  assert.deepEqual(result, {
+    ok: false,
+    code: 'save-config-invalid',
+  })
 
   cleanup()
 })
