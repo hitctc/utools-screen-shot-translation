@@ -38,7 +38,10 @@ function normalizePluginSettings(raw) {
     translationMode: VALID_TRANSLATION_MODES.has(data.translationMode)
       ? data.translationMode
       : DEFAULT_PLUGIN_SETTINGS.translationMode,
-    saveTranslatedImage: Boolean(data.saveTranslatedImage),
+    saveTranslatedImage:
+      typeof data.saveTranslatedImage === 'boolean'
+        ? data.saveTranslatedImage
+        : DEFAULT_PLUGIN_SETTINGS.saveTranslatedImage,
     saveDirectory: typeof data.saveDirectory === 'string' ? data.saveDirectory.trim() : '',
     confirmBeforeDelete:
       typeof data.confirmBeforeDelete === 'boolean'
@@ -47,9 +50,27 @@ function normalizePluginSettings(raw) {
   }
 }
 
+// 局部更新只覆盖合法字段，脏 partial 只会沿用当前已经持久化的值。
+function mergePluginSettings(current, partial) {
+  const base = normalizePluginSettings(current)
+  const patch = partial && typeof partial === 'object' ? partial : {}
+
+  return {
+    translationMode: VALID_TRANSLATION_MODES.has(patch.translationMode)
+      ? patch.translationMode
+      : base.translationMode,
+    saveTranslatedImage:
+      typeof patch.saveTranslatedImage === 'boolean' ? patch.saveTranslatedImage : base.saveTranslatedImage,
+    saveDirectory: typeof patch.saveDirectory === 'string' ? patch.saveDirectory.trim() : base.saveDirectory,
+    confirmBeforeDelete:
+      typeof patch.confirmBeforeDelete === 'boolean' ? patch.confirmBeforeDelete : base.confirmBeforeDelete,
+  }
+}
+
 module.exports = {
   DEFAULT_UI_SETTINGS,
   DEFAULT_PLUGIN_SETTINGS,
   normalizeUiSettings,
   normalizePluginSettings,
+  mergePluginSettings,
 }

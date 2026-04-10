@@ -69,7 +69,7 @@ test('normalizeUiSettings keeps supported theme modes and clamps window height',
   )
 })
 
-test('normalizePluginSettings keeps language and preview defaults stable', () => {
+test('normalizePluginSettings keeps plugin defaults stable', () => {
   assert.deepEqual(normalizePluginSettings({}), {
     translationMode: 'auto',
     saveTranslatedImage: false,
@@ -78,17 +78,17 @@ test('normalizePluginSettings keeps language and preview defaults stable', () =>
   })
 })
 
-test('normalizePluginSettings sanitizes invalid values', () => {
+test('normalizePluginSettings sanitizes invalid values with strict booleans', () => {
   assert.deepEqual(
     normalizePluginSettings({
       translationMode: 'ja-to-en',
-      saveTranslatedImage: 'yes',
+      saveTranslatedImage: 'false',
       saveDirectory: 42,
       confirmBeforeDelete: 'no',
     }),
     {
       translationMode: 'auto',
-      saveTranslatedImage: true,
+      saveTranslatedImage: false,
       saveDirectory: '',
       confirmBeforeDelete: true,
     },
@@ -166,7 +166,7 @@ test('getPluginSettings reads normalized values from storage', () => {
   const { services, cleanup } = loadServicesWithStorage({
     'screen-shot-translation-settings': {
       translationMode: 'en-to-zh',
-      saveTranslatedImage: 'yes',
+      saveTranslatedImage: 'false',
       saveDirectory: ' /tmp/translated ',
       confirmBeforeDelete: 'no',
     },
@@ -174,7 +174,7 @@ test('getPluginSettings reads normalized values from storage', () => {
 
   assert.deepEqual(services.getPluginSettings(), {
     translationMode: 'en-to-zh',
-    saveTranslatedImage: true,
+    saveTranslatedImage: false,
     saveDirectory: '/tmp/translated',
     confirmBeforeDelete: true,
   })
@@ -203,7 +203,7 @@ test('savePluginSettings normalizes and persists the new plugin settings payload
   cleanup()
 })
 
-test('savePluginSettings keeps persisted fields when only one field is updated', () => {
+test('savePluginSettings merges a valid partial update without clearing other fields', () => {
   const { services, storage, cleanup } = loadServicesWithStorage({
     'screen-shot-translation-settings': {
       translationMode: 'en-to-zh',
@@ -222,6 +222,56 @@ test('savePluginSettings keeps persisted fields when only one field is updated',
     saveTranslatedImage: true,
     saveDirectory: '/tmp/archive',
     confirmBeforeDelete: true,
+  })
+  assert.deepEqual(storage.get('screen-shot-translation-settings'), result)
+
+  cleanup()
+})
+
+test('savePluginSettings keeps existing translation mode when partial value is invalid', () => {
+  const { services, storage, cleanup } = loadServicesWithStorage({
+    'screen-shot-translation-settings': {
+      translationMode: 'en-to-zh',
+      saveTranslatedImage: false,
+      saveDirectory: '/tmp/cache',
+      confirmBeforeDelete: true,
+    },
+  })
+
+  const result = services.savePluginSettings({
+    translationMode: 'bad',
+  })
+
+  assert.deepEqual(result, {
+    translationMode: 'en-to-zh',
+    saveTranslatedImage: false,
+    saveDirectory: '/tmp/cache',
+    confirmBeforeDelete: true,
+  })
+  assert.deepEqual(storage.get('screen-shot-translation-settings'), result)
+
+  cleanup()
+})
+
+test('savePluginSettings keeps existing save directory when partial value is not a string', () => {
+  const { services, storage, cleanup } = loadServicesWithStorage({
+    'screen-shot-translation-settings': {
+      translationMode: 'zh-to-en',
+      saveTranslatedImage: true,
+      saveDirectory: '/tmp/export',
+      confirmBeforeDelete: false,
+    },
+  })
+
+  const result = services.savePluginSettings({
+    saveDirectory: 42,
+  })
+
+  assert.deepEqual(result, {
+    translationMode: 'zh-to-en',
+    saveTranslatedImage: true,
+    saveDirectory: '/tmp/export',
+    confirmBeforeDelete: false,
   })
   assert.deepEqual(storage.get('screen-shot-translation-settings'), result)
 

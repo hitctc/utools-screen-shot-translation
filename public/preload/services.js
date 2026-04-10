@@ -1,6 +1,7 @@
 const {
   normalizeUiSettings,
   normalizePluginSettings,
+  mergePluginSettings,
 } = require('./localState.cjs')
 
 const UI_SETTINGS_KEY = 'screen-shot-translation-ui-settings'
@@ -29,10 +30,7 @@ function getPluginSettings() {
 
 // 持久化插件设置时保留已有有效值，避免局部更新把另一个字段清空。
 function savePluginSettings(partial) {
-  const next = normalizePluginSettings({
-    ...getPluginSettings(),
-    ...(partial && typeof partial === 'object' ? partial : {}),
-  })
+  const next = mergePluginSettings(getPluginSettings(), partial)
 
   window.utools.dbStorage.setItem(PLUGIN_SETTINGS_KEY, next)
   return next
