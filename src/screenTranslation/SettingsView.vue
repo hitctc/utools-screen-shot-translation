@@ -1,18 +1,17 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import {
   DEFAULT_UI_SETTINGS,
-  PIN_PREVIEW_OPTIONS,
-  SOURCE_LANGUAGE_OPTIONS,
-  TARGET_LANGUAGE_OPTIONS,
+  TRANSLATION_MODE_OPTIONS,
   THEME_OPTIONS,
   WINDOW_HEIGHT_MAX,
   WINDOW_HEIGHT_MIN,
   WINDOW_HEIGHT_STEP,
-  type PinPreviewMode,
   type PluginSettings,
   type ThemeMode,
   type UiSettings,
 } from './types'
+import { getSaveDirectoryWarning } from './pluginSettings.js'
 
 const props = defineProps<{
   pluginSettings: PluginSettings
@@ -26,19 +25,30 @@ const emit = defineEmits<{
   (event: 'save-ui-settings', payload: Partial<UiSettings>): void
 }>()
 
-// 翻译方向只改动对应字段，避免骨架页一次改动把另一侧语言重置掉。
-function emitSourceLanguageChange(sourceLanguage: string) {
-  emit('save-plugin-settings', { sourceLanguage })
+const saveDirectoryWarning = computed(() => getSaveDirectoryWarning(props.pluginSettings))
+
+function emitPluginSettingChange(partial: Partial<PluginSettings>) {
+  emit('save-plugin-settings', partial)
 }
 
-// 目标语言是设置页里最明确的输出偏好，切换时立即同步到上层状态。
-function emitTargetLanguageChange(targetLanguage: string) {
-  emit('save-plugin-settings', { targetLanguage })
+// 这块只切换翻译方向骨架，不再回写旧的源语言 / 目标语言组合。
+function emitTranslationModeChange(translationMode: PluginSettings['translationMode']) {
+  emitPluginSettingChange({ translationMode })
 }
 
-// 钉住预览目前只保留两种骨架模式，后续真实窗口接入时继续沿用这个入口。
-function emitPinPreviewModeChange(pinPreviewMode: PinPreviewMode) {
-  emit('save-plugin-settings', { pinPreviewMode })
+// 保存结果图片是独立开关，只有开启后目录字段才会被当成有效保存配置。
+function emitSaveTranslatedImageChange(saveTranslatedImage: boolean) {
+  emitPluginSettingChange({ saveTranslatedImage })
+}
+
+// 目录选择器还没接入前，先让用户直接编辑路径字符串，至少能把契约链路打通。
+function emitSaveDirectoryChange(saveDirectory: string) {
+  emitPluginSettingChange({ saveDirectory })
+}
+
+// 删除前二次确认要独立保留，避免后续接入真实删除动作时还沿用旧预览状态。
+function emitConfirmBeforeDeleteChange(confirmBeforeDelete: boolean) {
+  emitPluginSettingChange({ confirmBeforeDelete })
 }
 
 // 主题设置继续沿用 preload 里的 UI 设置存储，不在组件内保留第二份状态。
@@ -67,7 +77,7 @@ function emitResetWindowHeight() {
       <header class="settings-card__header">
         <p class="section-label">Translation Settings</p>
         <h1>设置</h1>
-        <p class="settings-copy">这里先保留翻译和钉住相关配置骨架，后续再接入真实服务和窗口行为。</p>
+        <p class="settings-copy">这里先把翻译保存相关契约接通，目录选择和真实删除流程后续再补。</p>
       </header>
 
       <div class="settings-layout">
@@ -75,55 +85,112 @@ function emitResetWindowHeight() {
           <div class="settings-group__header">
             <div>
               <p class="group-title">翻译方向</p>
-              <p class="group-copy">当前骨架仍然允许切换源语言和目标语言，便于后续直接接真实服务。</p>
+              <p class="group-copy">当前只保留翻译模式，后续接真实翻译服务时再把映射细节接进去。</p>
             </div>
-            <span class="status-chip">源 {{ pluginSettings.sourceLanguage }} / 目标 {{ pluginSettings.targetLanguage }}</span>
-          </div>
-
-          <div class="settings-fields settings-fields--split">
-            <label class="field">
-              <span class="field__label">源语言</span>
-              <select class="field__control" :value="pluginSettings.sourceLanguage" @change="emitSourceLanguageChange(($event.target as HTMLSelectElement).value)">
-                <option v-for="option in SOURCE_LANGUAGE_OPTIONS" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-
-            <label class="field">
-              <span class="field__label">目标语言</span>
-              <select class="field__control" :value="pluginSettings.targetLanguage" @change="emitTargetLanguageChange(($event.target as HTMLSelectElement).value)">
-                <option v-for="option in TARGET_LANGUAGE_OPTIONS" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-          </div>
-        </section>
-
-        <section class="settings-group">
-          <div class="settings-group__header">
-            <div>
-              <p class="group-title">钉住预览</p>
-              <p class="group-copy">这里只保留结果展示方式的骨架开关，实际钉住窗口仍待后续接入。</p>
-            </div>
-            <span class="status-chip">{{ pluginSettings.pinPreviewMode === 'overlay' ? '覆盖原图' : '并排预览' }}</span>
+            <span class="status-chip">
+              {{ TRANSLATION_MODE_OPTIONS.find((option) => option.value === pluginSettings.translationMode)?.label ?? pluginSettings.translationMode }}
+            </span>
           </div>
 
           <div class="choice-row">
             <button
-              v-for="option in PIN_PREVIEW_OPTIONS"
+              v-for="option in TRANSLATION_MODE_OPTIONS"
               :key="option.value"
               type="button"
               class="choice-button"
-              :class="{ 'choice-button--active': pluginSettings.pinPreviewMode === option.value }"
-              @click="emitPinPreviewModeChange(option.value)"
+              :class="{ 'choice-button--active': pluginSettings.translationMode === option.value }"
+              @click="emitTranslationModeChange(option.value)"
             >
               {{ option.label }}
             </button>
           </div>
         </section>
 
+        <section class="settings-group">
+          <div class="settings-group__header">
+            <div>
+              <p class="group-title">保存结果图片</p>
+              <p class="group-copy">开启后才会把翻译后的图片视为需要落盘的结果。</p>
+            </div>
+            <span class="status-chip">{{ pluginSettings.saveTranslatedImage ? '已开启' : '已关闭' }}</span>
+          </div>
+
+          <div class="choice-row">
+            <button
+              type="button"
+              class="choice-button"
+              :class="{ 'choice-button--active': pluginSettings.saveTranslatedImage }"
+              @click="emitSaveTranslatedImageChange(true)"
+            >
+              开启
+            </button>
+            <button
+              type="button"
+              class="choice-button"
+              :class="{ 'choice-button--active': !pluginSettings.saveTranslatedImage }"
+              @click="emitSaveTranslatedImageChange(false)"
+            >
+              关闭
+            </button>
+          </div>
+
+          <p v-if="saveDirectoryWarning" class="field__hint field__hint--warning">
+            {{ saveDirectoryWarning }}
+          </p>
+        </section>
+
+        <section class="settings-group">
+          <div class="settings-group__header">
+            <div>
+              <p class="group-title">保存目录</p>
+              <p class="group-copy">目录选择器还没接入前，先用文本输入框保存路径字符串。</p>
+            </div>
+            <span class="status-chip">{{ pluginSettings.saveDirectory || '未设置' }}</span>
+          </div>
+
+          <label class="field">
+            <span class="field__label">保存目录</span>
+            <input
+              class="field__control"
+              type="text"
+              :value="pluginSettings.saveDirectory"
+              placeholder="/Users/you/Pictures/translation"
+              @input="emitSaveDirectoryChange(($event.target as HTMLInputElement).value)"
+            />
+          </label>
+        </section>
+
+        <section class="settings-group">
+          <div class="settings-group__header">
+            <div>
+              <p class="group-title">删除前二次确认</p>
+              <p class="group-copy">后续接删除动作时，这个开关会决定是否先弹出确认步骤。</p>
+            </div>
+            <span class="status-chip">{{ pluginSettings.confirmBeforeDelete ? '需要确认' : '直接删除' }}</span>
+          </div>
+
+          <div class="choice-row">
+            <button
+              type="button"
+              class="choice-button"
+              :class="{ 'choice-button--active': pluginSettings.confirmBeforeDelete }"
+              @click="emitConfirmBeforeDeleteChange(true)"
+            >
+              需要确认
+            </button>
+            <button
+              type="button"
+              class="choice-button"
+              :class="{ 'choice-button--active': !pluginSettings.confirmBeforeDelete }"
+              @click="emitConfirmBeforeDeleteChange(false)"
+            >
+              直接删除
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <section class="settings-card__footer">
         <section class="settings-group">
           <div class="settings-group__header">
             <div>
@@ -180,7 +247,7 @@ function emitResetWindowHeight() {
             </button>
           </div>
         </section>
-      </div>
+      </section>
     </section>
   </section>
 </template>

@@ -31,7 +31,7 @@
   - 插件身份已经切换为 `uTools Screen Shot Translation`
   - `public/plugin.json` 已定义单一入口 `screen-shot-translation`
   - 首页已经替换成三步流骨架：`截屏`、`翻译`、`钉住`
-  - 保留设置页，用于承载翻译方向、钉住预览、主题模式和窗口高度
+  - 保留设置页，用于承载翻译方向、保存结果图片、保存目录、删除前二次确认，以及主题模式和窗口高度
   - 支持 `跟随系统 / 深色 / 浅色` 三态主题
   - 支持在系统主题变化时同步刷新页面主题和状态文案
   - 支持通过 `dbStorage` 持久化 UI 设置和插件设置
@@ -68,7 +68,7 @@
 - `src/screenTranslation/HomeView.vue`
   首页视图，负责展示 `截屏 / 翻译 / 钉住` 三步流骨架、错误提示和设置入口。
 - `src/screenTranslation/SettingsView.vue`
-  设置页视图，负责翻译方向、钉住预览、主题模式和窗口高度的骨架配置展示。
+  设置页视图，负责翻译方向、保存结果图片、保存目录、删除前二次确认，以及主题模式和窗口高度的骨架配置展示。
 - `src/screenTranslation/theme.js`
   负责三态主题解析、系统主题同步和状态文案格式化。
 - `src/screenTranslation/types.ts`
@@ -85,6 +85,8 @@
   负责主题模式解析、状态文案和系统主题响应式同步测试。
 - `tests/preload/bootShell.test.mjs`
   负责静态启动壳移除逻辑的最小单测。
+- `tests/pluginSettings.test.mjs`
+  负责前端侧插件设置归一化和保存目录警告文案的最小契约测试。
 - `vite.config.js`
   Vite 构建配置；当前 `base` 固定为 `./`，用于适配 uTools 本地资源加载。
 - `dist/`
@@ -235,6 +237,7 @@
   - 主插件窗口高度设置与持久化
   - `translationMode`、`saveTranslatedImage`、`saveDirectory`、`confirmBeforeDelete` 插件设置与持久化
   - `preload` 设置接口与最小测试覆盖
+  - 前端设置页已切到新的插件设置契约，并能在保存结果图片开启但目录为空时提示警告
 - 当前仍未具备：
   - 真实截屏
   - 真实 OCR

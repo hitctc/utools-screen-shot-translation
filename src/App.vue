@@ -7,7 +7,6 @@ import {
   DEFAULT_UI_SETTINGS,
   WINDOW_HEIGHT_MAX,
   WINDOW_HEIGHT_MIN,
-  type PinPreviewMode,
   type PluginSettings,
   type ScreenTranslationStep,
   type ScreenTranslationView,
@@ -25,6 +24,7 @@ import {
   createResetAppState,
 } from './screenTranslation/appState.js'
 import { createScreenTranslationAppController } from './screenTranslation/appController.js'
+import { normalizePluginSettings } from './screenTranslation/pluginSettings.js'
 
 type ServicesBridge = {
   getUiSettings?: () => UiSettings
@@ -106,28 +106,6 @@ function normalizeUiSettings(raw: Partial<UiSettings> | null | undefined): UiSet
       Number.isFinite(parsedWindowHeight) && parsedWindowHeight > 0
         ? clampWindowHeight(parsedWindowHeight)
         : DEFAULT_UI_SETTINGS.windowHeight,
-  }
-}
-
-// 插件设置只保留翻译方向和钉住预览模式，避免旧业务字段再次混入新骨架。
-function normalizePluginSettings(raw: Partial<PluginSettings> | null | undefined): PluginSettings {
-  const candidate = raw && typeof raw === 'object' ? raw : {}
-  const sourceLanguage =
-    typeof candidate.sourceLanguage === 'string' && candidate.sourceLanguage.trim()
-      ? candidate.sourceLanguage.trim()
-      : DEFAULT_PLUGIN_SETTINGS.sourceLanguage
-  const targetLanguage =
-    typeof candidate.targetLanguage === 'string' && candidate.targetLanguage.trim()
-      ? candidate.targetLanguage.trim()
-      : DEFAULT_PLUGIN_SETTINGS.targetLanguage
-  const pinPreviewMode = ['overlay', 'side-by-side'].includes(String(candidate.pinPreviewMode))
-    ? (candidate.pinPreviewMode as PinPreviewMode)
-    : DEFAULT_PLUGIN_SETTINGS.pinPreviewMode
-
-  return {
-    sourceLanguage,
-    targetLanguage,
-    pinPreviewMode,
   }
 }
 

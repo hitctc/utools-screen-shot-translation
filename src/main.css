@@ -165,6 +165,10 @@ select {
   line-height: 1.6;
 }
 
+.field__hint--warning {
+  color: var(--danger);
+}
+
 .section-label,
 .step-card__index {
   margin: 0;
@@ -200,6 +204,11 @@ select {
 }
 
 .settings-card {
+  display: grid;
+  gap: 20px;
+}
+
+.settings-card__footer {
   display: grid;
   gap: 20px;
 }
