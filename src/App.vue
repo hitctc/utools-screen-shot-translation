@@ -7,7 +7,6 @@ import {
   DEFAULT_UI_SETTINGS,
   WINDOW_HEIGHT_MAX,
   WINDOW_HEIGHT_MIN,
-  type ScreenTranslationFeatureCode,
   type PinPreviewMode,
   type PluginSettings,
   type ScreenTranslationStep,
@@ -23,13 +22,9 @@ import {
   syncPrefersDarkState,
 } from './screenTranslation/theme.js'
 import {
-  resolvePluginEnterTransition,
-} from './screenTranslation/entryFlow.js'
-import {
-  applyPluginEnterTransitionToAppState,
-  applyViewResetToAppState,
   createResetAppState,
 } from './screenTranslation/appState.js'
+import { createScreenTranslationAppController } from './screenTranslation/appController.js'
 
 type ServicesBridge = {
   getUiSettings?: () => UiSettings
@@ -188,34 +183,12 @@ function readPersistedState() {
   syncUiPresentation()
 }
 
-// App 只保留一个很薄的写回层，具体怎么重置由适配模块决定。
-function syncAppState(nextState: ReturnType<typeof createResetAppState>) {
+// App 只保留一个很薄的写回层，具体怎么重置由 controller 决定。
+function setAppState(nextState: ReturnType<typeof createResetAppState>) {
   currentView.value = nextState.currentView
   currentStep.value = nextState.currentStep
   processing.value = nextState.processing
   workflowResult.value = nextState.workflowResult
-}
-
-// 先把当前运行态快照出来，再交给适配模块算下一帧状态。
-function snapshotAppState() {
-  return {
-    currentView: currentView.value,
-    currentStep: currentStep.value,
-    processing: processing.value,
-    workflowResult: workflowResult.value,
-  }
-}
-
-// 入口分发先放到一个地方，后面接 records 和 result 页面时就不用再拆逻辑。
-function handlePluginEnter({ code }: { code?: ScreenTranslationFeatureCode } = {}) {
-  readPersistedState()
-
-  const transition = resolvePluginEnterTransition(code)
-  syncAppState(applyPluginEnterTransitionToAppState(snapshotAppState(), transition))
-
-  if (transition.refreshRecords) {
-    void refreshRecords()
-  }
 }
 
 // 系统主题变化时只刷新根节点主题，不额外引入新的响应式状态。
@@ -310,24 +283,9 @@ function startPin() {
   })
 }
 
-// 进入设置页前先把主流程收干净，避免返回首页时沿用旧步骤。
-function openSettings() {
-  syncAppState(applyViewResetToAppState(snapshotAppState(), 'settings'))
-}
-
-// 返回首页时统一回到新的截屏起点，避免 settings / records 把旧步骤带回来。
-function goHome() {
-  syncAppState(applyViewResetToAppState(snapshotAppState(), 'home'))
-}
-
 // 记录页目前只做入口占位，后续接入真实记录数据时再把刷新逻辑补完整。
 async function refreshRecords() {
   resetWorkflowResult()
-}
-
-// 主入口先回到首页骨架，后面真正的截屏、翻译和钉住流程都从这里扩展。
-async function runMainWorkflow() {
-  syncAppState(applyViewResetToAppState(snapshotAppState(), 'home'))
 }
 
 // UI 设置优先写回 preload；没有 bridge 时就用本地兜底结构保证界面还能预览。
@@ -353,6 +311,18 @@ function savePluginSettings(partial: Partial<PluginSettings>) {
   pluginSettings.value = normalizePluginSettings(nextSettings)
 }
 
+const appController = createScreenTranslationAppController({
+  getState: () => ({
+    currentView: currentView.value,
+    currentStep: currentStep.value,
+    processing: processing.value,
+    workflowResult: workflowResult.value,
+  }),
+  setState: setAppState,
+  readPersistedState,
+  refreshRecords,
+})
+
 onMounted(() => {
   attachSystemThemeListener()
   readPersistedState()
@@ -364,7 +334,7 @@ onMounted(() => {
   }
 
   if (typeof window.utools?.onPluginEnter === 'function') {
-    window.utools.onPluginEnter(handlePluginEnter)
+    window.utools.onPluginEnter(appController.handlePluginEnter)
   }
 
   if (typeof window.utools?.onDbPull === 'function') {
@@ -392,7 +362,7 @@ onBeforeUnmount(() => {
     @start-capture="startCapture"
     @start-translate="startTranslate"
     @start-pin="startPin"
-    @open-settings="openSettings"
+    @open-settings="appController.openSettings"
   />
 
   <section v-else-if="currentView === 'records'" class="page-shell page-shell--records">
@@ -411,7 +381,7 @@ onBeforeUnmount(() => {
     </section>
 
     <div class="actions-row actions-row--home">
-      <button type="button" class="secondary-button" @click="goHome">返回首页</button>
+      <button type="button" class="secondary-button" @click="appController.goHome">返回首页</button>
     </div>
   </section>
 
@@ -431,7 +401,7 @@ onBeforeUnmount(() => {
     </section>
 
     <div class="actions-row actions-row--home">
-      <button type="button" class="secondary-button" @click="goHome">返回首页</button>
+      <button type="button" class="secondary-button" @click="appController.goHome">返回首页</button>
     </div>
   </section>
 
@@ -440,7 +410,7 @@ onBeforeUnmount(() => {
     :plugin-settings="pluginSettings"
     :ui-settings="uiSettings"
     :theme-status="themeStatus"
-    @back="goHome"
+    @back="appController.goHome"
     @save-plugin-settings="savePluginSettings"
     @save-ui-settings="saveUiSettings"
   />
