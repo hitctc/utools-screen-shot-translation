@@ -58,7 +58,32 @@ window.services = {
   saveUiSettings,
   getPluginSettings,
   savePluginSettings,
+  // 目录选择只负责把系统选择器结果收口成单个目录字符串，取消时返回空串。
+  pickSaveDirectory: async () => {
+    if (!window.utools || typeof window.utools.showOpenDialog !== 'function') {
+      return ''
+    }
+
+    const result = await window.utools.showOpenDialog({
+      properties: ['openDirectory'],
+    })
+
+    if (Array.isArray(result)) {
+      return typeof result[0] === 'string' ? result[0] : ''
+    }
+
+    if (result && typeof result === 'object' && Array.isArray(result.filePaths)) {
+      return typeof result.filePaths[0] === 'string' ? result.filePaths[0] : ''
+    }
+
+    return typeof result === 'string' ? result : ''
+  },
   listSavedRecords: () => listSavedRecords({ fs, path, settings: getPluginSettings() }),
   deleteSavedRecord: (recordId) => deleteSavedRecord({ fs, path, settings: getPluginSettings(), recordId }),
+  // 当前版本没有真实重钉能力时，桥接层只返回一个诚实失败给前端闭环。
+  repinSavedRecord: async (recordId) => {
+    void recordId
+    return { ok: false, code: 'repin-failed' }
+  },
   runCaptureTranslationPin,
 }

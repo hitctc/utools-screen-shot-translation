@@ -31,6 +31,11 @@ type WorkflowBridgeResult = {
   code: string
 }
 
+type RecordBridgeResult = {
+  ok: boolean
+  code?: string
+}
+
 type SavedRecordEntry = {
   id?: string
   imageFilename?: string
@@ -46,7 +51,10 @@ type ServicesBridge = {
   saveUiSettings?: (partial: Partial<UiSettings>) => UiSettings
   getPluginSettings?: () => PluginSettings
   savePluginSettings?: (partial: Partial<PluginSettings>) => PluginSettings
+  pickSaveDirectory?: () => Promise<string>
   listSavedRecords?: () => Promise<SavedRecordManifest>
+  deleteSavedRecord?: (recordId: string) => Promise<unknown>
+  repinSavedRecord?: (recordId: string) => Promise<RecordBridgeResult>
   runCaptureTranslationPin?: () => Promise<WorkflowBridgeResult>
 }
 
@@ -59,6 +67,8 @@ const workflowResult = ref<WorkflowResultState>(createEmptyWorkflowResultState()
 const prefersDark = ref(false)
 const previewWarningMessage = ref('')
 const recordsWarningMessage = ref('')
+const resultRetryMode = ref<'workflow' | 'repin' | ''>('')
+const resultRetryRecordId = ref('')
 let systemThemeQuery: MediaQueryList | null = null
 
 type WorkflowResultState = WorkflowResultPresentation & {
@@ -74,9 +84,7 @@ const themeStatus = computed(() =>
 )
 const recordsEmptyStateTitle = '暂时还没有钉住记录'
 const recordsEmptyStateCopy = computed(() =>
-  recordsWarningMessage.value
-    ? recordsWarningMessage.value
-    : previewWarningMessage.value
+  previewWarningMessage.value
     ? `${previewWarningMessage.value} 当前还没有接入真实记录桥接，后续完成截屏、翻译、钉住后，这里会显示保存下来的记录。`
     : '当前还没有接入真实记录桥接，后续完成截屏、翻译、钉住后，这里会显示保存下来的记录。',
 )
@@ -144,13 +152,20 @@ function createEmptyWorkflowResultState(): WorkflowResultState {
 }
 
 // 结果页状态统一由这个入口写入，保持显示内容和按钮开关一起更新。
-function setWorkflowFailure(code: string, override?: Partial<WorkflowResultPresentation>) {
+function setWorkflowFailure(
+  code: string,
+  override?: Partial<WorkflowResultPresentation>,
+  retryMode: 'workflow' | 'repin' | '' = 'workflow',
+  retryRecordId = '',
+) {
   workflowResult.value = {
     visible: true,
     code,
     ...mapWorkflowFailureToResult(code),
     ...override,
   }
+  resultRetryMode.value = retryMode
+  resultRetryRecordId.value = retryRecordId
   currentView.value = 'result'
 }
 
@@ -159,6 +174,8 @@ function goRecords() {
   currentView.value = 'records'
   workflowResult.value = createEmptyWorkflowResultState()
   recordsWarningMessage.value = ''
+  resultRetryMode.value = ''
+  resultRetryRecordId.value = ''
   recordsLoading.value = false
   void refreshRecords()
 }
@@ -198,13 +215,68 @@ async function refreshRecords() {
   }
 }
 
-// 记录页上的重钉和删除按钮先保留事件壳，等 Task 6 接入真实交互再落逻辑。
-function repinRecord(recordId: string) {
-  void recordId
+// 记录页上的重钉先走服务桥接，当前没有真实 pin 能力时统一落到结果页失败态。
+async function repinRecord(recordId: string) {
+  const services = getServices()
+  const result = await services?.repinSavedRecord?.(recordId)
+
+  if (!result?.ok) {
+    setWorkflowFailure(result?.code ?? 'repin-failed', undefined, 'repin', recordId)
+  }
 }
 
-function deleteRecord(recordId: string) {
-  void recordId
+// 删除记录前先看保存配置是否要求确认，确认后再刷新记录列表。
+async function deleteRecord(recordId: string) {
+  const services = getServices()
+
+  if (!services?.deleteSavedRecord) {
+    return
+  }
+
+  if (pluginSettings.value.confirmBeforeDelete) {
+    const shouldDelete = typeof window.confirm === 'function'
+      ? window.confirm('确定删除这条保存记录吗？')
+      : true
+
+    if (!shouldDelete) {
+      return
+    }
+  }
+
+  let deleteFailed = false
+
+  try {
+    await services.deleteSavedRecord(recordId)
+  } catch {
+    deleteFailed = true
+  } finally {
+    await refreshRecords()
+  }
+
+  if (deleteFailed && !recordsWarningMessage.value) {
+    recordsWarningMessage.value = '删除记录失败，请检查保存目录后重试。'
+  }
+}
+
+// 选择保存目录只负责把桥接结果写回插件设置，不在这里伪造目录值。
+async function pickSaveDirectory() {
+  const services = getServices()
+  const directory = await services?.pickSaveDirectory?.()
+
+  if (directory) {
+    savePluginSettings({ saveDirectory: directory })
+    await refreshRecords()
+  }
+}
+
+// 结果页的“重试”要跟着失败来源走，不能把重钉失败误导成重新开始截屏主流程。
+async function retryWorkflowResult() {
+  if (resultRetryMode.value === 'repin' && resultRetryRecordId.value) {
+    await repinRecord(resultRetryRecordId.value)
+    return
+  }
+
+  await runMainWorkflowEntry()
 }
 
 // 主流程只在 run 入口触发，先调用 preload 里的占位编排，再把失败码映射成结果页。
@@ -213,6 +285,8 @@ async function runMainWorkflowEntry() {
 
   recordsLoading.value = true
   workflowResult.value = createEmptyWorkflowResultState()
+  resultRetryMode.value = 'workflow'
+  resultRetryRecordId.value = ''
 
   try {
     const result = await services?.runCaptureTranslationPin?.()
@@ -374,6 +448,7 @@ onBeforeUnmount(() => {
     :loading="recordsLoading"
     :empty-state-title="recordsEmptyStateTitle"
     :empty-state-copy="recordsEmptyStateCopy"
+    :warning="recordsWarningMessage"
     :theme-status="themeStatus"
     @repin-record="repinRecord"
     @delete-record="deleteRecord"
@@ -386,6 +461,7 @@ onBeforeUnmount(() => {
     :ui-settings="uiSettings"
     :theme-status="themeStatus"
     @back="goRecords"
+    @pick-save-directory="pickSaveDirectory"
     @save-plugin-settings="savePluginSettings"
     @save-ui-settings="saveUiSettings"
   />
@@ -399,7 +475,7 @@ onBeforeUnmount(() => {
     :show-retry="workflowResult.showRetry"
     :show-open-settings="workflowResult.showOpenSettings"
     :show-close="workflowResult.showClose"
-    @retry="runMainWorkflowEntry"
+    @retry="retryWorkflowResult"
     @open-settings="openSettings"
     @close="closeResult"
   />

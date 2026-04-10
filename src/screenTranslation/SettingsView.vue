@@ -21,6 +21,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'back'): void
+  (event: 'pick-save-directory'): void
   (event: 'save-plugin-settings', payload: Partial<PluginSettings>): void
   (event: 'save-ui-settings', payload: Partial<UiSettings>): void
 }>()
@@ -69,7 +70,7 @@ const saveDirectoryWarning = computed(() => getSaveDirectoryWarning(props.plugin
       </div>
       <h1>设置</h1>
       <p class="settings-copy">
-        这里只保留当前已经落地的字段。目录选择、重钉确认和真实删除流程还在后续任务里，这一页只负责保存契约。
+        这里只保留当前已经落地的字段。目录选择已经接通，重钉和真实删除流程还在后续任务里，这一页只负责保存契约。
       </p>
       <div class="actions-row actions-row--settings">
         <button type="button" class="secondary-button secondary-button--compact" @click="emit('back')">
@@ -111,7 +112,7 @@ const saveDirectoryWarning = computed(() => getSaveDirectoryWarning(props.plugin
         <div class="settings-card__header">
           <div>
             <p class="group-title">保存结果图片</p>
-            <p class="group-copy">保存开关和目录一起组成有效配置，目录现在先用文本字段承接。</p>
+            <p class="group-copy">保存开关和目录一起组成有效配置，目录现在既可以手输，也可以通过系统选择器填写。</p>
           </div>
           <span class="status-chip">{{ pluginSettings.saveTranslatedImage ? '已开启' : '已关闭' }}</span>
         </div>
@@ -135,6 +136,12 @@ const saveDirectoryWarning = computed(() => getSaveDirectoryWarning(props.plugin
             @input="emitSaveDirectoryChange(($event.target as HTMLInputElement).value)"
           />
         </label>
+
+        <div class="actions-row">
+          <button type="button" class="secondary-button secondary-button--compact" @click="emit('pick-save-directory')">
+            选择保存目录
+          </button>
+        </div>
 
         <p v-if="saveDirectoryWarning" class="field__hint field__hint--warning">
           {{ saveDirectoryWarning }}

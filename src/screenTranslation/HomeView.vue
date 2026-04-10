@@ -6,6 +6,7 @@ defineProps<{
   loading: boolean
   emptyStateTitle: string
   emptyStateCopy: string
+  warning: string
   themeStatus: string
 }>()
 
@@ -25,9 +26,11 @@ const emit = defineEmits<{
       </div>
       <h1>钉住记录</h1>
       <p class="hero-copy">
-        当前页面先承载已保存的钉住记录。真实记录桥接、重钉和删除确认会在后续任务里接入，这里只保留记录页壳和空态。
+        当前页面承载已保存的钉住记录。重钉当前先通过失败闭环占位，删除会按设置里的确认开关执行。
       </p>
     </header>
+
+    <p v-if="warning" class="state-card state-card--error">{{ warning }}</p>
 
     <section v-if="loading" class="state-card state-card--hint">
       <p class="section-label">Loading</p>

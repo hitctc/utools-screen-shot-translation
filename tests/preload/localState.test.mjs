@@ -11,13 +11,14 @@ const {
   normalizePluginSettings,
 } = require('../../public/preload/localState.cjs')
 
-function loadServicesWithStorage(initialStorage = {}) {
+function loadServicesWithStorage(initialStorage = {}, options = {}) {
   const servicesModulePath = path.resolve('public/preload/services.js')
   delete require.cache[servicesModulePath]
 
   const storage = new Map(Object.entries(initialStorage))
   global.window = {
     utools: {
+      showOpenDialog: options.showOpenDialog ?? (async () => []),
       dbStorage: {
         getItem(key) {
           return storage.has(key) ? storage.get(key) : null
@@ -120,10 +121,49 @@ test('services exposes the plugin settings and record store bridge', () => {
     'getPluginSettings',
     'getUiSettings',
     'listSavedRecords',
+    'pickSaveDirectory',
+    'repinSavedRecord',
     'runCaptureTranslationPin',
     'savePluginSettings',
     'saveUiSettings',
   ])
+
+  cleanup()
+})
+
+test('pickSaveDirectory returns the first selected directory or an empty string', async () => {
+  const { services, cleanup } = loadServicesWithStorage(
+    {},
+    {
+      showOpenDialog: async () => ['/tmp/export', '/tmp/ignored'],
+    },
+  )
+
+  assert.equal(await services.pickSaveDirectory(), '/tmp/export')
+
+  cleanup()
+})
+
+test('pickSaveDirectory returns an empty string when the dialog is cancelled', async () => {
+  const { services, cleanup } = loadServicesWithStorage(
+    {},
+    {
+      showOpenDialog: async () => [],
+    },
+  )
+
+  assert.equal(await services.pickSaveDirectory(), '')
+
+  cleanup()
+})
+
+test('repinSavedRecord returns the honest failure contract', async () => {
+  const { services, cleanup } = loadServicesWithStorage()
+
+  assert.deepEqual(await services.repinSavedRecord('record-1'), {
+    ok: false,
+    code: 'repin-failed',
+  })
 
   cleanup()
 })
