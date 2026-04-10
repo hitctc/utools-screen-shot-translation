@@ -10,12 +10,11 @@
   },
   "features": [
     {
-      "code": "bookmarks",
-      "explain": "快速展示和配置 Google Chrome 书签文件",
+      "code": "screen-shot-translation",
+      "explain": "截屏、翻译并把翻译后的图片钉住在屏幕上",
       "cmds": [
-        "书签",
-        "快捷书签",
-        "chrome书签"
+        "截屏&翻译",
+        "截屏&翻译&钉住"
       ]
     }
   ]

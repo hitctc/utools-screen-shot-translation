@@ -1,4 +1,6 @@
 {
+  "name": "utools-screen-shot-translation",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -6,7 +8,6 @@
     "test": "node --test tests/preload/*.test.mjs"
   },
   "dependencies": {
-    "pinyin-pro": "^3.28.0",
     "vue": "^3.5.13"
   },
   "devDependencies": {
