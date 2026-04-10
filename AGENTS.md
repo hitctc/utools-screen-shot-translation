@@ -37,6 +37,7 @@
   - 支持通过 `dbStorage` 持久化 UI 设置和插件设置
   - 支持调整主插件窗口高度，并在重新进入插件时恢复
   - 支持 Vue 挂载前显示静态首屏壳子，避免纯白空屏
+  - 插件设置模型已切到 `translationMode / saveTranslatedImage / saveDirectory / confirmBeforeDelete`，`preload` 侧已完成归一化和测试收口
 - 当前明确限制：
   - 还没有接入真实截屏能力
   - 还没有接入真实 OCR 或翻译服务
@@ -61,7 +62,7 @@
 - `public/preload/services.js`
   负责桥接 `utools.dbStorage`，并通过 `window.services` 暴露当前插件正式保留的四个本地设置方法：`getUiSettings`、`saveUiSettings`、`getPluginSettings`、`savePluginSettings`。
 - `public/preload/localState.cjs`
-  负责 UI 设置与插件设置的归一化规则，包括主题模式、窗口高度、源语言、目标语言和钉住预览模式。
+  负责 UI 设置与插件设置的归一化规则，包括主题模式、窗口高度，以及翻译保存相关的 `translationMode`、`saveTranslatedImage`、`saveDirectory` 和 `confirmBeforeDelete`。
 - `src/App.vue`
   当前插件 UI 总入口，负责首页 / 设置页双视图切换、三步流状态迁移、主题同步和窗口高度应用。
 - `src/screenTranslation/HomeView.vue`
@@ -79,7 +80,7 @@
 - `src/main.css`
   当前截屏翻译工具骨架页的基础样式和主题 token。
 - `tests/preload/localState.test.mjs`
-  负责当前 `preload` 正式保留的设置归一化与读写合并语义测试。
+  负责当前 `preload` 正式保留的设置归一化与读写合并语义测试，包括新的插件设置默认值、脏值归一化和局部更新持久化。
 - `tests/preload/theme.test.mjs`
   负责主题模式解析、状态文案和系统主题响应式同步测试。
 - `tests/preload/bootShell.test.mjs`
@@ -232,12 +233,13 @@
   - `截屏 / 翻译 / 钉住` 三步流骨架
   - `跟随系统 / 深色 / 浅色` 三态主题
   - 主插件窗口高度设置与持久化
-  - 源语言、目标语言、钉住预览模式设置与持久化
+  - `translationMode`、`saveTranslatedImage`、`saveDirectory`、`confirmBeforeDelete` 插件设置与持久化
   - `preload` 设置接口与最小测试覆盖
 - 当前仍未具备：
   - 真实截屏
   - 真实 OCR
   - 真实翻译
   - 真实钉住窗口
+  - 目录选择、历史记录和删除确认工作流
 
 后续协作者如果继续推进功能，默认应从“真实截屏能力怎么收口到 preload”和“翻译 / 钉住链路如何在当前三步流骨架上接入”这两条主线思考，而不是再回退到旧项目结构。

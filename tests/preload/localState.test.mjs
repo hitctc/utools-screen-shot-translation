@@ -70,34 +70,44 @@ test('normalizeUiSettings keeps supported theme modes and clamps window height',
 })
 
 test('normalizePluginSettings keeps language and preview defaults stable', () => {
-  assert.deepEqual(normalizePluginSettings({}), DEFAULT_PLUGIN_SETTINGS)
+  assert.deepEqual(normalizePluginSettings({}), {
+    translationMode: 'auto',
+    saveTranslatedImage: false,
+    saveDirectory: '',
+    confirmBeforeDelete: true,
+  })
 })
 
-test('normalizePluginSettings trims language values and rejects invalid preview mode', () => {
+test('normalizePluginSettings sanitizes invalid values', () => {
   assert.deepEqual(
     normalizePluginSettings({
-      sourceLanguage: ' en ',
-      targetLanguage: ' ja ',
-      pinPreviewMode: 'floating',
+      translationMode: 'ja-to-en',
+      saveTranslatedImage: 'yes',
+      saveDirectory: 42,
+      confirmBeforeDelete: 'no',
     }),
     {
-      sourceLanguage: 'en',
-      targetLanguage: 'ja',
-      pinPreviewMode: 'overlay',
+      translationMode: 'auto',
+      saveTranslatedImage: true,
+      saveDirectory: '',
+      confirmBeforeDelete: true,
     },
   )
 })
 
-test('normalizePluginSettings preserves supported preview mode and fills missing languages', () => {
+test('normalizePluginSettings preserves supported translation mode and trims save directory', () => {
   assert.deepEqual(
     normalizePluginSettings({
-      sourceLanguage: '   ',
-      pinPreviewMode: 'side-by-side',
+      translationMode: 'en-to-zh',
+      saveTranslatedImage: true,
+      saveDirectory: ' /tmp/export ',
+      confirmBeforeDelete: false,
     }),
     {
-      sourceLanguage: 'auto',
-      targetLanguage: 'zh-CN',
-      pinPreviewMode: 'side-by-side',
+      translationMode: 'en-to-zh',
+      saveTranslatedImage: true,
+      saveDirectory: '/tmp/export',
+      confirmBeforeDelete: false,
     },
   )
 })
@@ -155,16 +165,18 @@ test('saveUiSettings merges partial updates with the persisted ui settings', () 
 test('getPluginSettings reads normalized values from storage', () => {
   const { services, cleanup } = loadServicesWithStorage({
     'screen-shot-translation-settings': {
-      sourceLanguage: ' en ',
-      targetLanguage: 'ja',
-      pinPreviewMode: 'floating',
+      translationMode: 'en-to-zh',
+      saveTranslatedImage: 'yes',
+      saveDirectory: ' /tmp/translated ',
+      confirmBeforeDelete: 'no',
     },
   })
 
   assert.deepEqual(services.getPluginSettings(), {
-    sourceLanguage: 'en',
-    targetLanguage: 'ja',
-    pinPreviewMode: 'overlay',
+    translationMode: 'en-to-zh',
+    saveTranslatedImage: true,
+    saveDirectory: '/tmp/translated',
+    confirmBeforeDelete: true,
   })
 
   cleanup()
@@ -174,15 +186,17 @@ test('savePluginSettings normalizes and persists the new plugin settings payload
   const { services, storage, cleanup } = loadServicesWithStorage()
 
   const result = services.savePluginSettings({
-    sourceLanguage: ' en ',
-    targetLanguage: '   ',
-    pinPreviewMode: 'floating',
+    translationMode: 'zh-to-en',
+    saveTranslatedImage: true,
+    saveDirectory: ' /tmp/save ',
+    confirmBeforeDelete: false,
   })
 
   assert.deepEqual(result, {
-    sourceLanguage: 'en',
-    targetLanguage: 'zh-CN',
-    pinPreviewMode: 'overlay',
+    translationMode: 'zh-to-en',
+    saveTranslatedImage: true,
+    saveDirectory: '/tmp/save',
+    confirmBeforeDelete: false,
   })
   assert.deepEqual(storage.get('screen-shot-translation-settings'), result)
 
@@ -192,20 +206,22 @@ test('savePluginSettings normalizes and persists the new plugin settings payload
 test('savePluginSettings keeps persisted fields when only one field is updated', () => {
   const { services, storage, cleanup } = loadServicesWithStorage({
     'screen-shot-translation-settings': {
-      sourceLanguage: 'en',
-      targetLanguage: 'ja',
-      pinPreviewMode: 'side-by-side',
+      translationMode: 'en-to-zh',
+      saveTranslatedImage: true,
+      saveDirectory: '/tmp/cache',
+      confirmBeforeDelete: true,
     },
   })
 
   const result = services.savePluginSettings({
-    targetLanguage: ' fr ',
+    saveDirectory: ' /tmp/archive ',
   })
 
   assert.deepEqual(result, {
-    sourceLanguage: 'en',
-    targetLanguage: 'fr',
-    pinPreviewMode: 'side-by-side',
+    translationMode: 'en-to-zh',
+    saveTranslatedImage: true,
+    saveDirectory: '/tmp/archive',
+    confirmBeforeDelete: true,
   })
   assert.deepEqual(storage.get('screen-shot-translation-settings'), result)
 

@@ -22,7 +22,7 @@ function saveUiSettings(partial) {
   return next
 }
 
-// 插件设置只服务于截图翻译能力，读取时统一补齐默认语种和预览模式。
+// 插件设置只服务于截图翻译能力，读取时统一补齐保存和删除相关默认值。
 function getPluginSettings() {
   return normalizePluginSettings(window.utools.dbStorage.getItem(PLUGIN_SETTINGS_KEY))
 }
