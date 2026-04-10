@@ -45,16 +45,6 @@ window.services = {
   saveUiSettings,
   getPluginSettings,
   savePluginSettings,
+  listSavedRecords: () => listSavedRecords({ fs, path, settings: getPluginSettings() }),
+  deleteSavedRecord: (recordId) => deleteSavedRecord({ fs, path, settings: getPluginSettings(), recordId }),
 }
-
-// 记录清单能力走同一个 preload 入口，但不改变现有设置接口的枚举行为。
-Object.defineProperties(window.services, {
-  listSavedRecords: {
-    enumerable: false,
-    value: () => listSavedRecords({ fs, path, settings: getPluginSettings() }),
-  },
-  deleteSavedRecord: {
-    enumerable: false,
-    value: (recordId) => deleteSavedRecord({ fs, path, settings: getPluginSettings(), recordId }),
-  },
-})

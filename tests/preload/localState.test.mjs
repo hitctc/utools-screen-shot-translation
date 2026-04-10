@@ -112,12 +112,14 @@ test('normalizePluginSettings preserves supported translation mode and trims sav
   )
 })
 
-test('services only exposes the current plugin setting APIs', () => {
+test('services exposes the plugin settings and record store bridge', () => {
   const { services, cleanup } = loadServicesWithStorage()
 
   assert.deepEqual(Object.keys(services).sort(), [
+    'deleteSavedRecord',
     'getPluginSettings',
     'getUiSettings',
+    'listSavedRecords',
     'savePluginSettings',
     'saveUiSettings',
   ])

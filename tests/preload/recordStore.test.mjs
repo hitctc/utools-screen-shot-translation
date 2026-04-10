@@ -72,7 +72,9 @@ test('reconcileRecords drops entries whose image file is missing', async () => {
 })
 
 test('readRecordManifest returns an empty manifest when the file is missing', async () => {
-  const { fs } = createFsMock()
+  const { fs } = createFsMock({
+    existingPaths: new Set(['/tmp/save']),
+  })
 
   const result = await readRecordManifest({
     fs,
@@ -84,7 +86,9 @@ test('readRecordManifest returns an empty manifest when the file is missing', as
 })
 
 test('writeRecordManifest sorts records and stamps a fresh updatedAt value', async () => {
-  const { fs, writes } = createFsMock()
+  const { fs, writes } = createFsMock({
+    existingPaths: new Set(['/tmp/save']),
+  })
 
   const result = await writeRecordManifest({
     fs,
@@ -120,7 +124,7 @@ test('listSavedRecords reconciles missing files before returning the manifest', 
         }),
       ],
     ]),
-    existingPaths: new Set(['/tmp/save/b.png']),
+    existingPaths: new Set(['/tmp/save', '/tmp/save/b.png']),
   })
 
   const result = await listSavedRecords({
@@ -150,7 +154,7 @@ test('deleteSavedRecord removes the targeted record and its image file', async (
         }),
       ],
     ]),
-    existingPaths: new Set(['/tmp/save/a.png', '/tmp/save/b.png']),
+    existingPaths: new Set(['/tmp/save', '/tmp/save/a.png', '/tmp/save/b.png']),
   })
 
   const result = await deleteSavedRecord({
@@ -164,4 +168,114 @@ test('deleteSavedRecord removes the targeted record and its image file', async (
   assert.equal(unlinks.length, 1)
   assert.equal(unlinks[0], '/tmp/save/a.png')
   assert.equal(writes.length, 1)
+})
+
+test('deleteSavedRecord rejects absolute paths outside the save directory', async () => {
+  const manifestPath = path.join('/tmp/save', getManifestFilename())
+  const { fs, writes, unlinks } = createFsMock({
+    manifestByPath: new Map([
+      [
+        manifestPath,
+        JSON.stringify({
+          version: 1,
+          updatedAt: '2026-04-10T12:00:00.000Z',
+          records: [
+            { id: 'a', imageFilename: '/tmp/outside/a.png', createdAt: '2026-04-10T12:00:00.000Z' },
+          ],
+        }),
+      ],
+    ]),
+    existingPaths: new Set(['/tmp/save', '/tmp/outside/a.png']),
+  })
+
+  const result = await deleteSavedRecord({
+    fs,
+    path,
+    settings: { saveDirectory: '/tmp/save' },
+    recordId: 'a',
+  })
+
+  assert.deepEqual(result.records, [])
+  assert.equal(unlinks.length, 0)
+  assert.equal(writes.length, 1)
+})
+
+test('deleteSavedRecord rejects traversal paths outside the save directory', async () => {
+  const manifestPath = path.join('/tmp/save', getManifestFilename())
+  const { fs, writes, unlinks } = createFsMock({
+    manifestByPath: new Map([
+      [
+        manifestPath,
+        JSON.stringify({
+          version: 1,
+          updatedAt: '2026-04-10T12:00:00.000Z',
+          records: [
+            { id: 'a', imageFilename: '../escape/a.png', createdAt: '2026-04-10T12:00:00.000Z' },
+          ],
+        }),
+      ],
+    ]),
+    existingPaths: new Set(['/tmp/save', path.resolve('/tmp/save', '../escape/a.png')]),
+  })
+
+  const result = await deleteSavedRecord({
+    fs,
+    path,
+    settings: { saveDirectory: '/tmp/save' },
+    recordId: 'a',
+  })
+
+  assert.deepEqual(result.records, [])
+  assert.equal(unlinks.length, 0)
+  assert.equal(writes.length, 1)
+})
+
+test('deleteSavedRecord returns a no-op manifest when the save directory is missing', async () => {
+  const { fs, writes, unlinks } = createFsMock()
+
+  const result = await deleteSavedRecord({
+    fs,
+    path,
+    settings: { saveDirectory: '/tmp/missing' },
+    recordId: 'a',
+  })
+
+  assert.deepEqual(result, getEmptyRecordManifest())
+  assert.equal(unlinks.length, 0)
+  assert.equal(writes.length, 0)
+})
+
+test('deleteSavedRecord surfaces unlink failures other than missing files', async () => {
+  const manifestPath = path.join('/tmp/save', getManifestFilename())
+  const { fs } = createFsMock({
+    manifestByPath: new Map([
+      [
+        manifestPath,
+        JSON.stringify({
+          version: 1,
+          updatedAt: '2026-04-10T12:00:00.000Z',
+          records: [
+            { id: 'a', imageFilename: '/tmp/save/a.png', createdAt: '2026-04-10T12:00:00.000Z' },
+          ],
+        }),
+      ],
+    ]),
+    existingPaths: new Set(['/tmp/save', '/tmp/save/a.png']),
+  })
+
+  fs.promises.unlink = async () => {
+    const error = new Error('permission denied')
+    error.code = 'EACCES'
+    throw error
+  }
+
+  await assert.rejects(
+    deleteSavedRecord({
+      fs,
+      path,
+      settings: { saveDirectory: '/tmp/save' },
+      recordId: 'a',
+    }),
+    (error) => error && error.code === 'EACCES',
+  )
 })
