@@ -361,7 +361,7 @@ test('runCaptureTranslationPin starts the workflow after screenCapture returns a
 
   assert.deepEqual(result, {
     ok: false,
-    code: 'translation-failed',
+    code: 'translation-config-invalid',
   })
 
   cleanup()

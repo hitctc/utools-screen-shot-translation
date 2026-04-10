@@ -15,6 +15,7 @@ export type TranslationMode = 'auto' | 'en-to-zh' | 'zh-to-en'
 export type WorkflowFailureCode =
   | 'capture-cancelled'
   | 'translation-failed'
+  | 'translation-config-invalid'
   | 'save-config-invalid'
   | 'save-failed'
   | 'pin-failed'

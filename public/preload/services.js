@@ -5,6 +5,7 @@ const {
 } = require('./localState.cjs')
 const { listSavedRecords, deleteSavedRecord } = require('./recordStore.cjs')
 const { runMainWorkflow } = require('./workflow.cjs')
+const { translateCapturedImage } = require('./baiduPictureTranslate.cjs')
 const fs = require('fs')
 const path = require('path')
 
@@ -15,7 +16,7 @@ const PLUGIN_SETTINGS_KEY = 'screen-shot-translation-settings'
 function captureImageWithUtools(utools) {
   return new Promise((resolve) => {
     if (!utools || typeof utools.screenCapture !== 'function') {
-      resolve({ ok: false, code: 'cancelled' })
+      resolve({ ok: false, code: 'capture-cancelled' })
       return
     }
 
@@ -28,7 +29,7 @@ function captureImageWithUtools(utools) {
         return
       }
 
-      resolve({ ok: false, code: 'cancelled' })
+      resolve({ ok: false, code: 'capture-cancelled' })
     })
   })
 }
@@ -64,12 +65,18 @@ function savePluginSettings(partial) {
 
 // 主流程先接上真实截图能力，后续翻译 / 钉住 / 保存仍继续走受控占位。
 function runCaptureTranslationPin() {
+  const settings = getPluginSettings()
+
   return runMainWorkflow({
-    settings: getPluginSettings(),
+    settings,
     captureImage: async () => captureImageWithUtools(window.utools),
-    translateImage: async () => ({ ok: false, code: 'not-implemented' }),
-    pinImage: async () => ({ ok: false, code: 'not-implemented' }),
-    saveImage: async () => ({ ok: false, code: 'not-implemented' }),
+    translateImage: async (captureResult) =>
+      translateCapturedImage({
+        captureResult,
+        settings,
+      }),
+    pinImage: async () => ({ ok: false, code: 'pin-failed' }),
+    saveImage: async () => ({ ok: false, code: 'save-failed' }),
   })
 }
 

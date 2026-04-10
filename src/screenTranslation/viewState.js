@@ -22,6 +22,14 @@ export function mapWorkflowFailureToResult(code) {
         showOpenSettings: false,
         showClose: true,
       }
+    case 'translation-config-invalid':
+      return {
+        title: '翻译配置不完整',
+        message: '当前环境还没有配置百度图片翻译凭证，请先提供 BAIDU_FANYI_APP_ID 和 BAIDU_FANYI_APP_KEY。',
+        showRetry: true,
+        showOpenSettings: false,
+        showClose: true,
+      }
     case 'save-config-invalid':
       return {
         title: '保存配置还没准备好',

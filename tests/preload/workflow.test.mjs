@@ -52,7 +52,7 @@ test('runMainWorkflow returns capture-cancelled when capture is cancelled', asyn
 
   const result = await runMainWorkflow({
     ...createWorkflowDeps({
-      captureImage: async () => ({ ok: false, code: 'cancelled' }),
+      captureImage: async () => ({ ok: false, code: 'capture-cancelled' }),
       translateImage: async () => {
         translateCalls += 1
         return { ok: true }
@@ -72,7 +72,7 @@ test('runMainWorkflow returns translation-failed when translation fails', async 
 
   const result = await runMainWorkflow({
     ...createWorkflowDeps({
-      translateImage: async () => ({ ok: false, code: 'service-error' }),
+      translateImage: async () => ({ ok: false, code: 'translation-failed' }),
       pinImage: async () => {
         pinCalls += 1
         return { ok: true }
@@ -85,6 +85,19 @@ test('runMainWorkflow returns translation-failed when translation fails', async 
     code: 'translation-failed',
   })
   assert.equal(pinCalls, 0)
+})
+
+test('runMainWorkflow keeps explicit translation failure codes from the translate step', async () => {
+  const result = await runMainWorkflow({
+    ...createWorkflowDeps({
+      translateImage: async () => ({ ok: false, code: 'translation-config-invalid' }),
+    }),
+  })
+
+  assert.deepEqual(result, {
+    ok: false,
+    code: 'translation-config-invalid',
+  })
 })
 
 test('runMainWorkflow returns translation-failed when translation throws', async () => {
@@ -107,7 +120,7 @@ test('runMainWorkflow returns pin-failed when pinning fails', async () => {
 
   const result = await runMainWorkflow({
     ...createWorkflowDeps({
-      pinImage: async () => ({ ok: false, code: 'window-blocked' }),
+      pinImage: async () => ({ ok: false, code: 'pin-failed' }),
       saveImage: async () => {
         saveCalls += 1
         return { ok: true }
@@ -150,7 +163,7 @@ test('runMainWorkflow returns save-failed when saving fails', async () => {
       },
       saveImage: async (_translationResult, _bounds) => {
         saveCalls += 1
-        return { ok: false, code: 'disk-full' }
+        return { ok: false, code: 'save-failed' }
       },
     }),
   })

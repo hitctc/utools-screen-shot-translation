@@ -12,6 +12,11 @@ function isOkResult(result) {
   return !!result && typeof result === 'object' && result.ok === true
 }
 
+// 步骤如果已经给出了明确失败码，就不要再被主流程压扁成泛化错误。
+function isFailureResult(result) {
+  return !!result && typeof result === 'object' && result.ok === false && typeof result.code === 'string'
+}
+
 // 主流程只依赖保存开关和目录，这里先把 settings 压成当前阶段需要的最小形状。
 function normalizeWorkflowSettings(settings) {
   const data = settings && typeof settings === 'object' ? settings : {}
@@ -35,7 +40,11 @@ function buildFailure(code) {
 async function runWorkflowStep(step, failureCode, ...args) {
   try {
     const result = await step?.(...args)
-    return isOkResult(result) ? result : buildFailure(failureCode)
+    if (isOkResult(result)) {
+      return result
+    }
+
+    return isFailureResult(result) ? result : buildFailure(failureCode)
   } catch {
     return buildFailure(failureCode)
   }

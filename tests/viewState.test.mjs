@@ -3,6 +3,16 @@ import assert from 'node:assert/strict'
 
 import { mapSavedRecordToViewRecord, mapWorkflowFailureToResult } from '../src/screenTranslation/viewState.js'
 
+test('mapWorkflowFailureToResult explains missing translation credentials explicitly', () => {
+  assert.deepEqual(mapWorkflowFailureToResult('translation-config-invalid'), {
+    title: '翻译配置不完整',
+    message: '当前环境还没有配置百度图片翻译凭证，请先提供 BAIDU_FANYI_APP_ID 和 BAIDU_FANYI_APP_KEY。',
+    showRetry: true,
+    showOpenSettings: false,
+    showClose: true,
+  })
+})
+
 test('mapWorkflowFailureToResult falls back to a safe retryable result for unknown codes', () => {
   assert.deepEqual(mapWorkflowFailureToResult('unexpected-code'), {
     title: '这次没有完成钉住',
