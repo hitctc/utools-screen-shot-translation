@@ -19,6 +19,7 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
   global.window = {
     utools: {
       showOpenDialog: options.showOpenDialog ?? (async () => []),
+      screenCapture: options.screenCapture ?? ((callback) => callback('')),
       dbStorage: {
         getItem(key) {
           return storage.has(key) ? storage.get(key) : null
@@ -336,6 +337,56 @@ test('runCaptureTranslationPin returns save-config-invalid when the persisted sa
   assert.deepEqual(result, {
     ok: false,
     code: 'save-config-invalid',
+  })
+
+  cleanup()
+})
+
+test('runCaptureTranslationPin starts the workflow after screenCapture returns an image', async () => {
+  const { services, cleanup } = loadServicesWithStorage(
+    {
+      'screen-shot-translation-settings': {
+        translationMode: 'auto',
+        saveTranslatedImage: false,
+        saveDirectory: '',
+        confirmBeforeDelete: true,
+      },
+    },
+    {
+      screenCapture: (callback) => callback('data:image/png;base64,abc123'),
+    },
+  )
+
+  const result = await services.runCaptureTranslationPin()
+
+  assert.deepEqual(result, {
+    ok: false,
+    code: 'translation-failed',
+  })
+
+  cleanup()
+})
+
+test('runCaptureTranslationPin keeps capture-cancelled when screenCapture returns an empty image', async () => {
+  const { services, cleanup } = loadServicesWithStorage(
+    {
+      'screen-shot-translation-settings': {
+        translationMode: 'auto',
+        saveTranslatedImage: false,
+        saveDirectory: '',
+        confirmBeforeDelete: true,
+      },
+    },
+    {
+      screenCapture: (callback) => callback(''),
+    },
+  )
+
+  const result = await services.runCaptureTranslationPin()
+
+  assert.deepEqual(result, {
+    ok: false,
+    code: 'capture-cancelled',
   })
 
   cleanup()

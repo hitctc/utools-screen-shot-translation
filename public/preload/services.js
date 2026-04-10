@@ -11,6 +11,28 @@ const path = require('path')
 const UI_SETTINGS_KEY = 'screen-shot-translation-ui-settings'
 const PLUGIN_SETTINGS_KEY = 'screen-shot-translation-settings'
 
+// 截图桥接只负责把 uTools 回调风格能力收口成稳定 Promise，方便主流程统一编排。
+function captureImageWithUtools(utools) {
+  return new Promise((resolve) => {
+    if (!utools || typeof utools.screenCapture !== 'function') {
+      resolve({ ok: false, code: 'cancelled' })
+      return
+    }
+
+    utools.screenCapture((image) => {
+      if (typeof image === 'string' && image.trim()) {
+        resolve({
+          ok: true,
+          image,
+        })
+        return
+      }
+
+      resolve({ ok: false, code: 'cancelled' })
+    })
+  })
+}
+
 // 渲染层每次读取 UI 设置时都先走归一化，保证主题和窗口高度字段始终完整。
 function getUiSettings() {
   return normalizeUiSettings(window.utools.dbStorage.getItem(UI_SETTINGS_KEY))
@@ -40,11 +62,11 @@ function savePluginSettings(partial) {
   return next
 }
 
-// 目前还没有真实 capture / translate / pin / save 实现，这里先挂一层可测试的占位编排。
+// 主流程先接上真实截图能力，后续翻译 / 钉住 / 保存仍继续走受控占位。
 function runCaptureTranslationPin() {
   return runMainWorkflow({
     settings: getPluginSettings(),
-    captureImage: async () => ({ ok: false, code: 'cancelled' }),
+    captureImage: async () => captureImageWithUtools(window.utools),
     translateImage: async () => ({ ok: false, code: 'not-implemented' }),
     pinImage: async () => ({ ok: false, code: 'not-implemented' }),
     saveImage: async () => ({ ok: false, code: 'not-implemented' }),
