@@ -165,6 +165,13 @@ function resetWorkflowResult() {
   }
 }
 
+// 主流程状态只收口到一个地方，避免设置页和记录页把旧步骤带回首页。
+function resetMainWorkflowState() {
+  currentStep.value = 'capture'
+  processing.value = false
+  resetWorkflowResult()
+}
+
 // 主流程失败时先把信息收口到一个结果对象，避免页面上散落多段临时文案。
 function setWorkflowFailure(code: WorkflowFailureCode, title: string, message: string) {
   workflowResult.value = {
@@ -189,18 +196,23 @@ function readPersistedState() {
 function handlePluginEnter({ code }: { code?: ScreenTranslationFeatureCode } = {}) {
   readPersistedState()
 
-  if (code === 'screen-shot-translation-settings') {
-    currentView.value = 'settings'
-    return
+  switch (code) {
+    case 'screen-shot-translation-settings':
+      resetMainWorkflowState()
+      currentView.value = 'settings'
+      return
+    case 'screen-shot-translation-records':
+      resetMainWorkflowState()
+      currentView.value = 'records'
+      void refreshRecords()
+      return
+    case 'screen-shot-translation-run':
+    case undefined:
+      void runMainWorkflow()
+      return
+    default:
+      showUnknownPluginEnter(code)
   }
-
-  if (code === 'screen-shot-translation-records') {
-    currentView.value = 'records'
-    void refreshRecords()
-    return
-  }
-
-  void runMainWorkflow()
 }
 
 // 系统主题变化时只刷新根节点主题，不额外引入新的响应式状态。
@@ -295,13 +307,15 @@ function startPin() {
   })
 }
 
-// 首页和设置页之间只切视图，不再保留旧书签页面的额外副状态。
+// 进入设置页前先把主流程收干净，避免返回首页时沿用旧步骤。
 function openSettings() {
+  resetMainWorkflowState()
   currentView.value = 'settings'
 }
 
-// 返回首页时保留当前三步流状态，方便继续从骨架的当前位置往后看。
+// 返回首页时统一回到新的截屏起点，避免 settings / records 把旧步骤带回来。
 function goHome() {
+  resetMainWorkflowState()
   currentView.value = 'home'
 }
 
@@ -310,12 +324,21 @@ async function refreshRecords() {
   resetWorkflowResult()
 }
 
+// 未识别入口不回退到主流程，直接给出明确提示，避免配置漂移时悄悄误入首页。
+function showUnknownPluginEnter(code: string | undefined) {
+  workflowResult.value = {
+    visible: true,
+    code: '',
+    title: '未识别的入口指令',
+    message: code ? `收到未知入口指令：${code}` : '收到空的入口指令。',
+  }
+  currentView.value = 'result'
+}
+
 // 主入口先回到首页骨架，后面真正的截屏、翻译和钉住流程都从这里扩展。
 async function runMainWorkflow() {
+  resetMainWorkflowState()
   currentView.value = 'home'
-  currentStep.value = 'capture'
-  processing.value = false
-  resetWorkflowResult()
 }
 
 // UI 设置优先写回 preload；没有 bridge 时就用本地兜底结构保证界面还能预览。
