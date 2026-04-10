@@ -11,7 +11,7 @@
   "features": [
     {
       "code": "screen-shot-translation",
-      "explain": "截屏、翻译并把翻译后的图片钉住在屏幕上",
+      "explain": "截屏、翻译与钉住流程骨架，暂未接入真实能力",
       "cmds": [
         "截屏&翻译",
         "截屏&翻译&钉住"
