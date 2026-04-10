@@ -24,10 +24,21 @@ import {
 } from './screenTranslation/theme.js'
 import { createUnknownPluginEnterResult } from './screenTranslation/entryFlow.js'
 import { normalizePluginSettings } from './screenTranslation/pluginSettings.js'
+import { mapSavedRecordToViewRecord, mapWorkflowFailureToResult } from './screenTranslation/viewState.js'
 
 type WorkflowBridgeResult = {
   ok: boolean
-  code: WorkflowFailureCode | 'success' | string
+  code: string
+}
+
+type SavedRecordEntry = {
+  id?: string
+  imageFilename?: string
+  createdAt?: string
+}
+
+type SavedRecordManifest = {
+  records?: SavedRecordEntry[]
 }
 
 type ServicesBridge = {
@@ -35,6 +46,7 @@ type ServicesBridge = {
   saveUiSettings?: (partial: Partial<UiSettings>) => UiSettings
   getPluginSettings?: () => PluginSettings
   savePluginSettings?: (partial: Partial<PluginSettings>) => PluginSettings
+  listSavedRecords?: () => Promise<SavedRecordManifest>
   runCaptureTranslationPin?: () => Promise<WorkflowBridgeResult>
 }
 
@@ -46,11 +58,12 @@ const pluginSettings = ref<PluginSettings>({ ...DEFAULT_PLUGIN_SETTINGS })
 const workflowResult = ref<WorkflowResultState>(createEmptyWorkflowResultState())
 const prefersDark = ref(false)
 const previewWarningMessage = ref('')
+const recordsWarningMessage = ref('')
 let systemThemeQuery: MediaQueryList | null = null
 
 type WorkflowResultState = WorkflowResultPresentation & {
   visible: boolean
-  code: WorkflowFailureCode | ''
+  code: string
 }
 
 const resolvedThemeMode = computed(() =>
@@ -61,7 +74,9 @@ const themeStatus = computed(() =>
 )
 const recordsEmptyStateTitle = '暂时还没有钉住记录'
 const recordsEmptyStateCopy = computed(() =>
-  previewWarningMessage.value
+  recordsWarningMessage.value
+    ? recordsWarningMessage.value
+    : previewWarningMessage.value
     ? `${previewWarningMessage.value} 当前还没有接入真实记录桥接，后续完成截屏、翻译、钉住后，这里会显示保存下来的记录。`
     : '当前还没有接入真实记录桥接，后续完成截屏、翻译、钉住后，这里会显示保存下来的记录。',
 )
@@ -128,62 +143,8 @@ function createEmptyWorkflowResultState(): WorkflowResultState {
   }
 }
 
-// 主流程失败时先把信息收口到一个结果对象，避免页面上散落多段临时文案。
-function mapWorkflowFailureToResult(code: WorkflowFailureCode): WorkflowResultPresentation {
-  switch (code) {
-    case 'capture-cancelled':
-      return {
-        title: '截屏被取消',
-        message: '你取消了截屏，这次流程没有继续往下执行。',
-        showRetry: true,
-        showOpenSettings: false,
-        showClose: true,
-      }
-    case 'translation-failed':
-      return {
-        title: '翻译失败',
-        message: '截屏已经完成，但翻译步骤没有成功。',
-        showRetry: true,
-        showOpenSettings: false,
-        showClose: true,
-      }
-    case 'save-config-invalid':
-      return {
-        title: '保存配置还没准备好',
-        message: '保存结果已开启，但还没有设置可写入的保存目录。',
-        showRetry: false,
-        showOpenSettings: true,
-        showClose: true,
-      }
-    case 'save-failed':
-      return {
-        title: '结果保存失败',
-        message: '翻译结果已经生成，但写入磁盘时出错了。',
-        showRetry: true,
-        showOpenSettings: false,
-        showClose: true,
-      }
-    case 'pin-failed':
-      return {
-        title: '钉住失败',
-        message: '这次没有把结果钉住到屏幕上。',
-        showRetry: true,
-        showOpenSettings: false,
-        showClose: true,
-      }
-    case 'repin-failed':
-      return {
-        title: '重钉失败',
-        message: '记录页里的重钉动作暂时没有完成。',
-        showRetry: true,
-        showOpenSettings: false,
-        showClose: true,
-      }
-  }
-}
-
 // 结果页状态统一由这个入口写入，保持显示内容和按钮开关一起更新。
-function setWorkflowFailure(code: WorkflowFailureCode, override?: Partial<WorkflowResultPresentation>) {
+function setWorkflowFailure(code: string, override?: Partial<WorkflowResultPresentation>) {
   workflowResult.value = {
     visible: true,
     code,
@@ -197,7 +158,9 @@ function setWorkflowFailure(code: WorkflowFailureCode, override?: Partial<Workfl
 function goRecords() {
   currentView.value = 'records'
   workflowResult.value = createEmptyWorkflowResultState()
+  recordsWarningMessage.value = ''
   recordsLoading.value = false
+  void refreshRecords()
 }
 
 // 设置页只做视图切换，不额外保留旧的结果态。
@@ -211,9 +174,28 @@ function closeResult() {
   goRecords()
 }
 
-// 记录页目前只保留一个本地空数组，不接 Task 6 的真实 records bridge。
-function refreshRecords() {
-  recordsLoading.value = false
+// 记录页进入时优先读 preload 里的总清单；桥接不可用或没有记录时，统一回到受控空态。
+async function refreshRecords() {
+  const services = getServices()
+
+  recordsLoading.value = true
+  recordsWarningMessage.value = ''
+
+  try {
+    const manifest = await services?.listSavedRecords?.()
+    const nextRecords = Array.isArray(manifest?.records)
+      ? manifest.records
+          .map((record, index) => mapSavedRecordToViewRecord(record, index, pluginSettings.value.saveDirectory))
+          .filter((record): record is ScreenTranslationRecord => Boolean(record))
+      : []
+
+    records.value = nextRecords
+  } catch {
+    records.value = []
+    recordsWarningMessage.value = '读取钉住记录失败，请检查保存目录和总清单文件后重试。'
+  } finally {
+    recordsLoading.value = false
+  }
 }
 
 // 记录页上的重钉和删除按钮先保留事件壳，等 Task 6 接入真实交互再落逻辑。
@@ -337,7 +319,6 @@ async function handlePluginEnter(event: { code?: string } = {}) {
 
   if (event.code === 'screen-shot-translation-records') {
     goRecords()
-    refreshRecords()
     return
   }
 
@@ -359,6 +340,7 @@ async function handlePluginEnter(event: { code?: string } = {}) {
 onMounted(() => {
   attachSystemThemeListener()
   readPersistedState()
+  void refreshRecords()
 
   if (!getServices()) {
     previewWarningMessage.value = '当前处于浏览器预览模式，状态保存和运行桥接尚未注入。'
@@ -375,6 +357,7 @@ onMounted(() => {
   if (typeof window.utools?.onDbPull === 'function') {
     window.utools.onDbPull(() => {
       readPersistedState()
+      void refreshRecords()
     })
   }
 })

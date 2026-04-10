@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import type { WorkflowFailureCode } from './types'
-
 defineProps<{
-  code: WorkflowFailureCode | ''
+  code: string
   title: string
   message: string
   themeStatus: string
