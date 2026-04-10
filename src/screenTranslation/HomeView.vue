@@ -1,78 +1,83 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { ScreenTranslationStep } from './types'
+import type { ScreenTranslationRecord } from './types'
 
-const props = defineProps<{
-  processing: boolean
-  currentStep: ScreenTranslationStep
-  captureStateText: string
-  translationStateText: string
-  pinStateText: string
-  error: string
+defineProps<{
+  records: ScreenTranslationRecord[]
+  loading: boolean
+  emptyStateTitle: string
+  emptyStateCopy: string
   themeStatus: string
 }>()
 
-defineEmits<{
-  (event: 'start-capture'): void
-  (event: 'start-translate'): void
-  (event: 'start-pin'): void
+const emit = defineEmits<{
+  (event: 'repin-record', recordId: string): void
+  (event: 'delete-record', recordId: string): void
   (event: 'open-settings'): void
 }>()
-
-const captureDisabled = computed(() => props.processing || props.currentStep !== 'capture')
-const translateDisabled = computed(() => props.processing || props.currentStep !== 'translate')
-const pinDisabled = computed(() => props.processing || props.currentStep !== 'pin')
 </script>
 
 <template>
-  <section class="page-shell page-shell--home">
-    <header class="hero-card">
+  <section class="page-shell page-shell--records">
+    <header class="hero-card hero-card--compact">
       <div class="hero-card__eyebrow">
         <p class="section-label">Screen Translation</p>
         <span class="status-chip">{{ themeStatus }}</span>
       </div>
-      <h1>截屏 -> 翻译 -> 钉住</h1>
-      <p class="hero-copy">当前版本先把主流程和设置入口搭起来，后续再接入真实截屏、OCR、翻译和钉住能力。</p>
+      <h1>钉住记录</h1>
+      <p class="hero-copy">
+        当前页面先承载已保存的钉住记录。真实记录桥接、重钉和删除确认会在后续任务里接入，这里只保留记录页壳和空态。
+      </p>
     </header>
 
-    <p v-if="error" class="state-card state-card--error">{{ error }}</p>
+    <section v-if="loading" class="state-card state-card--hint">
+      <p class="section-label">Loading</p>
+      <p>正在整理记录列表，请稍候。</p>
+    </section>
 
-    <div class="step-grid">
-      <section class="step-card" :class="{ 'step-card--active': currentStep === 'capture' }">
-        <p class="step-card__index">1. 截屏</p>
-        <h2>获取画面</h2>
-        <p>{{ captureStateText }}</p>
-        <button type="button" class="primary-button" :disabled="captureDisabled" @click="$emit('start-capture')">
-          开始截屏
+    <section v-else-if="records.length" class="records-grid" aria-label="钉住记录列表">
+      <article v-for="record in records" :key="record.id" class="record-card">
+        <button
+          type="button"
+          class="record-card__preview"
+          @click="emit('repin-record', record.id)"
+        >
+          <img class="record-card__image" :src="record.imagePath" :alt="record.orderLabel" />
+          <span class="record-card__overlay">
+            <span class="record-card__order">{{ record.orderLabel }}</span>
+            <span class="record-card__action">重钉</span>
+          </span>
         </button>
-      </section>
 
-      <section class="step-card" :class="{ 'step-card--active': currentStep === 'translate' }">
-        <p class="step-card__index">2. 翻译</p>
-        <h2>生成结果</h2>
-        <p>{{ translationStateText }}</p>
-        <button type="button" class="primary-button" :disabled="translateDisabled" @click="$emit('start-translate')">
-          开始翻译
-        </button>
-      </section>
+        <div class="record-card__meta">
+          <span>{{ record.orderLabel }}</span>
+          <span>{{ record.createdAtLabel }}</span>
+        </div>
 
-      <section class="step-card" :class="{ 'step-card--active': currentStep === 'pin' }">
-        <p class="step-card__index">3. 钉住</p>
-        <h2>保持可见</h2>
-        <p>{{ pinStateText }}</p>
-        <button type="button" class="primary-button" :disabled="pinDisabled" @click="$emit('start-pin')">
-          钉住结果
-        </button>
-      </section>
-    </div>
+        <div class="record-card__actions">
+          <button type="button" class="secondary-button secondary-button--compact" @click="emit('repin-record', record.id)">
+            重新钉住
+          </button>
+          <button
+            type="button"
+            class="secondary-button secondary-button--compact secondary-button--danger"
+            @click="emit('delete-record', record.id)"
+          >
+            删除
+          </button>
+        </div>
+      </article>
+    </section>
 
-    <section class="state-card state-card--hint">
-      <p class="section-label">Flow Status</p>
-      <p>现在只替换成三步流骨架。进入设置页后，可以继续确认翻译方向、钉住预览、主题和窗口高度。</p>
+    <section v-else class="empty-state">
+      <p class="section-label">Empty State</p>
+      <h2>{{ emptyStateTitle }}</h2>
+      <p class="empty-state__copy">
+        {{ emptyStateCopy }}
+      </p>
     </section>
 
     <div class="actions-row actions-row--home">
-      <button type="button" class="secondary-button" @click="$emit('open-settings')">设置</button>
+      <button type="button" class="secondary-button" @click="emit('open-settings')">设置</button>
     </div>
   </section>
 </template>

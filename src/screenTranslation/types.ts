@@ -4,6 +4,12 @@ export type ScreenTranslationFeatureCode =
   | 'screen-shot-translation-settings'
 
 export type ScreenTranslationView = 'records' | 'settings' | 'result'
+export type ScreenTranslationRecord = {
+  id: string
+  imagePath: string
+  createdAtLabel: string
+  orderLabel: string
+}
 export type ScreenTranslationStep = 'capture' | 'translate' | 'pin'
 export type TranslationMode = 'auto' | 'en-to-zh' | 'zh-to-en'
 export type WorkflowFailureCode =
@@ -25,6 +31,14 @@ export type PluginSettings = {
   saveTranslatedImage: boolean
   saveDirectory: string
   confirmBeforeDelete: boolean
+}
+
+export type WorkflowResultPresentation = {
+  title: string
+  message: string
+  showRetry: boolean
+  showOpenSettings: boolean
+  showClose: boolean
 }
 
 export const DEFAULT_UI_SETTINGS: UiSettings = {

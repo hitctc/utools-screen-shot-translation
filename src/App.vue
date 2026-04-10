@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import HomeView from './screenTranslation/HomeView.vue'
+import ResultView from './screenTranslation/ResultView.vue'
 import SettingsView from './screenTranslation/SettingsView.vue'
 import {
   DEFAULT_PLUGIN_SETTINGS,
@@ -8,11 +9,12 @@ import {
   WINDOW_HEIGHT_MAX,
   WINDOW_HEIGHT_MIN,
   type PluginSettings,
-  type ScreenTranslationStep,
+  type ScreenTranslationRecord,
   type ScreenTranslationView,
   type ThemeMode,
   type UiSettings,
   type WorkflowFailureCode,
+  type WorkflowResultPresentation,
 } from './screenTranslation/types'
 import {
   SYSTEM_THEME_QUERY,
@@ -20,37 +22,36 @@ import {
   resolveThemeMode,
   syncPrefersDarkState,
 } from './screenTranslation/theme.js'
-import {
-  createResetAppState,
-} from './screenTranslation/appState.js'
-import { createScreenTranslationAppController } from './screenTranslation/appController.js'
+import { createUnknownPluginEnterResult } from './screenTranslation/entryFlow.js'
 import { normalizePluginSettings } from './screenTranslation/pluginSettings.js'
+
+type WorkflowBridgeResult = {
+  ok: boolean
+  code: WorkflowFailureCode | 'success' | string
+}
 
 type ServicesBridge = {
   getUiSettings?: () => UiSettings
   saveUiSettings?: (partial: Partial<UiSettings>) => UiSettings
   getPluginSettings?: () => PluginSettings
   savePluginSettings?: (partial: Partial<PluginSettings>) => PluginSettings
+  runCaptureTranslationPin?: () => Promise<WorkflowBridgeResult>
 }
 
-type ScreenTranslationPageView = ScreenTranslationView | 'home'
-
-type WorkflowResultState = {
-  visible: boolean
-  code: WorkflowFailureCode | ''
-  title: string
-  message: string
-}
-
-const currentView = ref<ScreenTranslationPageView>('home')
-const currentStep = ref<ScreenTranslationStep>('capture')
-const processing = ref(false)
+const currentView = ref<ScreenTranslationView>('records')
+const records = ref<ScreenTranslationRecord[]>([])
+const recordsLoading = ref(false)
 const uiSettings = ref<UiSettings>({ ...DEFAULT_UI_SETTINGS })
 const pluginSettings = ref<PluginSettings>({ ...DEFAULT_PLUGIN_SETTINGS })
-const workflowResult = ref<WorkflowResultState>(createResetAppState('home').workflowResult)
+const workflowResult = ref<WorkflowResultState>(createEmptyWorkflowResultState())
 const prefersDark = ref(false)
 const previewWarningMessage = ref('')
 let systemThemeQuery: MediaQueryList | null = null
+
+type WorkflowResultState = WorkflowResultPresentation & {
+  visible: boolean
+  code: WorkflowFailureCode | ''
+}
 
 const resolvedThemeMode = computed(() =>
   resolveThemeMode(uiSettings.value.themeMode, prefersDark.value),
@@ -58,33 +59,11 @@ const resolvedThemeMode = computed(() =>
 const themeStatus = computed(() =>
   formatThemeStatus(uiSettings.value.themeMode, resolvedThemeMode.value),
 )
-const captureStateText = computed(() =>
-  currentStep.value === 'capture'
-    ? '等待开始一次新的截屏流程。'
-    : '截屏骨架已推进，后续会在这里替换成真实截图结果。',
-)
-const translationStateText = computed(() => {
-  if (currentStep.value === 'capture') {
-    return '需要先完成截屏，翻译结果占位才会出现。'
-  }
-
-  if (currentStep.value === 'translate') {
-    return '翻译阶段已经激活，下一步会在这里接入 OCR 与翻译服务。'
-  }
-
-  return '翻译结果骨架已准备好，可以继续进入钉住展示。'
-})
-const pinStateText = computed(() =>
-  currentStep.value === 'pin'
-    ? '钉住骨架已准备，但当前版本还不会真的创建钉住窗口。'
-    : '等待翻译阶段完成后，再把结果钉住到屏幕。',
-)
-const currentWorkflowError = computed(() =>
-  currentView.value === 'home'
-    ? workflowResult.value.visible
-      ? workflowResult.value.message
-      : previewWarningMessage.value
-    : '',
+const recordsEmptyStateTitle = '暂时还没有钉住记录'
+const recordsEmptyStateCopy = computed(() =>
+  previewWarningMessage.value
+    ? `${previewWarningMessage.value} 当前还没有接入真实记录桥接，后续完成截屏、翻译、钉住后，这里会显示保存下来的记录。`
+    : '当前还没有接入真实记录桥接，后续完成截屏、翻译、钉住后，这里会显示保存下来的记录。',
 )
 
 // 本地兜底也要和 preload 的窗口边界一致，避免浏览器预览模式表现跑偏。
@@ -92,7 +71,7 @@ function clampWindowHeight(windowHeight: number) {
   return Math.min(Math.max(windowHeight, WINDOW_HEIGHT_MIN), WINDOW_HEIGHT_MAX)
 }
 
-// 读取到的 UI 设置可能来自浏览器预览或旧存储，这里统一裁成骨架页可接受的形状。
+// 读取到的 UI 设置可能来自浏览器预览或旧存储，这里统一裁成页面可接受的形状。
 function normalizeUiSettings(raw: Partial<UiSettings> | null | undefined): UiSettings {
   const candidate = raw && typeof raw === 'object' ? raw : {}
   const themeMode = ['system', 'dark', 'light'].includes(String(candidate.themeMode))
@@ -118,7 +97,7 @@ function getServices() {
   return window.services as ServicesBridge
 }
 
-// 主题切换只依赖一份 data-theme，首页和设置页都从同一个根节点变量取色。
+// 主题切换只依赖一份 data-theme，首页、设置页和结果页都从同一个根节点变量取色。
 function applyThemeMode() {
   document.documentElement.dataset.theme = resolvedThemeMode.value
 }
@@ -137,19 +116,168 @@ function syncUiPresentation() {
 }
 
 // 统一的结果态先放在 App 里，后续失败码和结果页都沿着这个对象继续长。
-function resetWorkflowResult() {
-  workflowResult.value = createResetAppState('home').workflowResult
+function createEmptyWorkflowResultState(): WorkflowResultState {
+  return {
+    visible: false,
+    code: '',
+    title: '',
+    message: '',
+    showRetry: false,
+    showOpenSettings: false,
+    showClose: false,
+  }
 }
 
 // 主流程失败时先把信息收口到一个结果对象，避免页面上散落多段临时文案。
-function setWorkflowFailure(code: WorkflowFailureCode, title: string, message: string) {
+function mapWorkflowFailureToResult(code: WorkflowFailureCode): WorkflowResultPresentation {
+  switch (code) {
+    case 'capture-cancelled':
+      return {
+        title: '截屏被取消',
+        message: '你取消了截屏，这次流程没有继续往下执行。',
+        showRetry: true,
+        showOpenSettings: false,
+        showClose: true,
+      }
+    case 'translation-failed':
+      return {
+        title: '翻译失败',
+        message: '截屏已经完成，但翻译步骤没有成功。',
+        showRetry: true,
+        showOpenSettings: false,
+        showClose: true,
+      }
+    case 'save-config-invalid':
+      return {
+        title: '保存配置还没准备好',
+        message: '保存结果已开启，但还没有设置可写入的保存目录。',
+        showRetry: false,
+        showOpenSettings: true,
+        showClose: true,
+      }
+    case 'save-failed':
+      return {
+        title: '结果保存失败',
+        message: '翻译结果已经生成，但写入磁盘时出错了。',
+        showRetry: true,
+        showOpenSettings: false,
+        showClose: true,
+      }
+    case 'pin-failed':
+      return {
+        title: '钉住失败',
+        message: '这次没有把结果钉住到屏幕上。',
+        showRetry: true,
+        showOpenSettings: false,
+        showClose: true,
+      }
+    case 'repin-failed':
+      return {
+        title: '重钉失败',
+        message: '记录页里的重钉动作暂时没有完成。',
+        showRetry: true,
+        showOpenSettings: false,
+        showClose: true,
+      }
+  }
+}
+
+// 结果页状态统一由这个入口写入，保持显示内容和按钮开关一起更新。
+function setWorkflowFailure(code: WorkflowFailureCode, override?: Partial<WorkflowResultPresentation>) {
   workflowResult.value = {
     visible: true,
     code,
-    title,
-    message,
+    ...mapWorkflowFailureToResult(code),
+    ...override,
   }
   currentView.value = 'result'
+}
+
+// 进入记录页前先把失败态清掉，避免上一轮流程文案残留到新的视图里。
+function goRecords() {
+  currentView.value = 'records'
+  workflowResult.value = createEmptyWorkflowResultState()
+  recordsLoading.value = false
+}
+
+// 设置页只做视图切换，不额外保留旧的结果态。
+function openSettings() {
+  currentView.value = 'settings'
+  workflowResult.value = createEmptyWorkflowResultState()
+}
+
+// 记录页和结果页都可能回到记录页，这里统一复用同一个关闭动作。
+function closeResult() {
+  goRecords()
+}
+
+// 记录页目前只保留一个本地空数组，不接 Task 6 的真实 records bridge。
+function refreshRecords() {
+  recordsLoading.value = false
+}
+
+// 记录页上的重钉和删除按钮先保留事件壳，等 Task 6 接入真实交互再落逻辑。
+function repinRecord(recordId: string) {
+  void recordId
+}
+
+function deleteRecord(recordId: string) {
+  void recordId
+}
+
+// 主流程只在 run 入口触发，先调用 preload 里的占位编排，再把失败码映射成结果页。
+async function runMainWorkflowEntry() {
+  const services = getServices()
+
+  recordsLoading.value = true
+  workflowResult.value = createEmptyWorkflowResultState()
+
+  try {
+    const result = await services?.runCaptureTranslationPin?.()
+
+    if (!result) {
+      setWorkflowFailure('translation-failed', {
+        title: '运行桥接还未注入',
+        message: '当前环境还没有可用的运行桥接，请在 uTools 中重新打开插件后再试。',
+        showRetry: true,
+        showOpenSettings: false,
+        showClose: true,
+      })
+      return
+    }
+
+    if (result.ok) {
+      goRecords()
+      return
+    }
+
+    setWorkflowFailure(result.code as WorkflowFailureCode)
+  } finally {
+    recordsLoading.value = false
+  }
+}
+
+// UI 设置优先写回 preload；没有 bridge 时就用本地兜底结构保证界面还能预览。
+function saveUiSettings(partial: Partial<UiSettings>) {
+  const services = getServices()
+  const nextSettings = services?.saveUiSettings?.(partial) ?? {
+    ...uiSettings.value,
+    ...partial,
+  }
+
+  uiSettings.value = normalizeUiSettings(nextSettings)
+  syncUiPresentation()
+}
+
+// 插件设置只持久化当前页展示的字段，避免未来真实能力接入前再引入额外状态。
+function savePluginSettings(partial: Partial<PluginSettings>) {
+  const services = getServices()
+  const nextSettings = services?.savePluginSettings?.(partial) ?? {
+    ...pluginSettings.value,
+    ...partial,
+  }
+
+  pluginSettings.value = normalizePluginSettings(nextSettings)
 }
 
 // 打开插件或收到 DB 拉新时，都复用同一套持久化设置回填逻辑。
@@ -159,14 +287,6 @@ function readPersistedState() {
   uiSettings.value = normalizeUiSettings(services?.getUiSettings?.() ?? uiSettings.value)
   pluginSettings.value = normalizePluginSettings(services?.getPluginSettings?.() ?? pluginSettings.value)
   syncUiPresentation()
-}
-
-// App 只保留一个很薄的写回层，具体怎么重置由 controller 决定。
-function setAppState(nextState: ReturnType<typeof createResetAppState>) {
-  currentView.value = nextState.currentView
-  currentStep.value = nextState.currentStep
-  processing.value = nextState.processing
-  workflowResult.value = nextState.workflowResult
 }
 
 // 系统主题变化时只刷新根节点主题，不额外引入新的响应式状态。
@@ -206,113 +326,50 @@ function detachSystemThemeListener() {
   systemThemeQuery.removeListener(handleSystemThemeChange)
 }
 
-// 所有骨架动作都先统一切 processing，再执行最小状态迁移，避免按钮重复点击。
-function runProcessingAction(action: () => void) {
-  resetWorkflowResult()
-  processing.value = true
+// 所有入口都先统一走这里，避免 run / records / settings 三种入口各写一套切换逻辑。
+async function handlePluginEnter(event: { code?: string } = {}) {
+  readPersistedState()
 
-  try {
-    action()
-  } finally {
-    processing.value = false
-  }
-}
-
-// 截屏动作当前只推进到翻译阶段，后续真实截图接入后继续复用这个入口。
-function startCapture() {
-  runProcessingAction(() => {
-    currentStep.value = 'translate'
-  })
-}
-
-// 翻译动作要求用户先完成截屏骨架，否则首页直接提示当前阻塞点。
-function startTranslate() {
-  if (currentStep.value === 'capture') {
-    setWorkflowFailure(
-      'translation-failed',
-      '请先完成截屏骨架',
-      '请先完成截屏骨架，再进入翻译。',
-    )
+  if (event.code === 'screen-shot-translation-settings') {
+    openSettings()
     return
   }
 
-  runProcessingAction(() => {
-    currentStep.value = 'pin'
-  })
-}
-
-// 钉住动作目前只给出受控提示，明确当前版本还停留在骨架替换阶段。
-function startPin() {
-  if (currentStep.value !== 'pin') {
-    setWorkflowFailure(
-      'pin-failed',
-      '请先完成翻译骨架',
-      '请先完成翻译骨架，再尝试钉住。',
-    )
+  if (event.code === 'screen-shot-translation-records') {
+    goRecords()
+    refreshRecords()
     return
   }
 
-  runProcessingAction(() => {
-    setWorkflowFailure(
-      'pin-failed',
-      '当前版本还未接入真实钉住能力',
-      '当前版本还未接入真实钉住能力。',
-    )
-  })
-}
-
-// 记录页目前只做入口占位，后续接入真实记录数据时再把刷新逻辑补完整。
-async function refreshRecords() {
-  resetWorkflowResult()
-}
-
-// UI 设置优先写回 preload；没有 bridge 时就用本地兜底结构保证界面还能预览。
-function saveUiSettings(partial: Partial<UiSettings>) {
-  const services = getServices()
-  const nextSettings = services?.saveUiSettings?.(partial) ?? {
-    ...uiSettings.value,
-    ...partial,
+  if (event.code === 'screen-shot-translation-run' || event.code === undefined) {
+    currentView.value = 'records'
+    await runMainWorkflowEntry()
+    return
   }
 
-  uiSettings.value = normalizeUiSettings(nextSettings)
-  syncUiPresentation()
-}
-
-// 插件设置只持久化当前页展示的字段，避免未来真实能力接入前再引入额外状态。
-function savePluginSettings(partial: Partial<PluginSettings>) {
-  const services = getServices()
-  const nextSettings = services?.savePluginSettings?.(partial) ?? {
-    ...pluginSettings.value,
-    ...partial,
+  workflowResult.value = {
+    ...createUnknownPluginEnterResult(event.code),
+    showRetry: false,
+    showOpenSettings: false,
+    showClose: true,
   }
-
-  pluginSettings.value = normalizePluginSettings(nextSettings)
+  currentView.value = 'result'
 }
-
-const appController = createScreenTranslationAppController({
-  getState: () => ({
-    currentView: currentView.value,
-    currentStep: currentStep.value,
-    processing: processing.value,
-    workflowResult: workflowResult.value,
-  }),
-  setState: setAppState,
-  readPersistedState,
-  refreshRecords,
-})
 
 onMounted(() => {
   attachSystemThemeListener()
   readPersistedState()
 
   if (!getServices()) {
-    previewWarningMessage.value = '当前处于浏览器预览模式，状态保存和真实能力桥接尚未注入。'
+    previewWarningMessage.value = '当前处于浏览器预览模式，状态保存和运行桥接尚未注入。'
   } else {
     previewWarningMessage.value = ''
   }
 
   if (typeof window.utools?.onPluginEnter === 'function') {
-    window.utools.onPluginEnter(appController.handlePluginEnter)
+    window.utools.onPluginEnter((event) => {
+      void handlePluginEnter(event ?? {})
+    })
   }
 
   if (typeof window.utools?.onDbPull === 'function') {
@@ -329,67 +386,38 @@ onBeforeUnmount(() => {
 
 <template>
   <HomeView
-    v-if="currentView === 'home'"
-    :processing="processing"
-    :current-step="currentStep"
-    :capture-state-text="captureStateText"
-    :translation-state-text="translationStateText"
-    :pin-state-text="pinStateText"
-    :error="currentWorkflowError"
+    v-if="currentView === 'records'"
+    :records="records"
+    :loading="recordsLoading"
+    :empty-state-title="recordsEmptyStateTitle"
+    :empty-state-copy="recordsEmptyStateCopy"
     :theme-status="themeStatus"
-    @start-capture="startCapture"
-    @start-translate="startTranslate"
-    @start-pin="startPin"
-    @open-settings="appController.openSettings"
+    @repin-record="repinRecord"
+    @delete-record="deleteRecord"
+    @open-settings="openSettings"
   />
 
-  <section v-else-if="currentView === 'records'" class="page-shell page-shell--records">
-    <header class="hero-card">
-      <div class="hero-card__eyebrow">
-        <p class="section-label">Records</p>
-        <span class="status-chip">{{ themeStatus }}</span>
-      </div>
-      <h1>钉住记录</h1>
-      <p class="hero-copy">这里先保留记录页入口，后续再把已保存的钉住记录接进来。</p>
-    </header>
-
-    <section class="state-card state-card--hint">
-      <p class="section-label">Placeholder</p>
-      <p>当前版本只把入口和视图切换骨架接通，记录列表还没有真正实现。</p>
-    </section>
-
-    <div class="actions-row actions-row--home">
-      <button type="button" class="secondary-button" @click="appController.goHome">返回首页</button>
-    </div>
-  </section>
-
-  <section v-else-if="currentView === 'result'" class="page-shell page-shell--result">
-    <header class="hero-card">
-      <div class="hero-card__eyebrow">
-        <p class="section-label">Result</p>
-        <span class="status-chip">{{ workflowResult.code || 'workflow' }}</span>
-      </div>
-      <h1>{{ workflowResult.title || '主流程结果' }}</h1>
-      <p class="hero-copy">{{ workflowResult.message || '这里会承载后续主流程的统一结果态。' }}</p>
-    </header>
-
-    <section class="state-card state-card--hint">
-      <p class="section-label">Result State</p>
-      <p>当前只保留一个统一结果态，后续失败、提示和完成态都可以继续沿着这里扩展。</p>
-    </section>
-
-    <div class="actions-row actions-row--home">
-      <button type="button" class="secondary-button" @click="appController.goHome">返回首页</button>
-    </div>
-  </section>
-
   <SettingsView
-    v-else
+    v-else-if="currentView === 'settings'"
     :plugin-settings="pluginSettings"
     :ui-settings="uiSettings"
     :theme-status="themeStatus"
-    @back="appController.goHome"
+    @back="goRecords"
     @save-plugin-settings="savePluginSettings"
     @save-ui-settings="saveUiSettings"
+  />
+
+  <ResultView
+    v-else
+    :code="workflowResult.code"
+    :title="workflowResult.title"
+    :message="workflowResult.message"
+    :theme-status="themeStatus"
+    :show-retry="workflowResult.showRetry"
+    :show-open-settings="workflowResult.showOpenSettings"
+    :show-close="workflowResult.showClose"
+    @retry="runMainWorkflowEntry"
+    @open-settings="openSettings"
+    @close="closeResult"
   />
 </template>
