@@ -26,7 +26,6 @@ function loadServicesWithStorage(initialStorage = {}) {
           storage.set(key, value)
         },
       },
-      shellOpenExternal() {},
     },
   }
 
@@ -103,57 +102,70 @@ test('normalizePluginSettings preserves supported preview mode and fills missing
   )
 })
 
-test('services keeps legacy preload methods during the Task 3 to Task 4 transition', () => {
+test('services only exposes the current plugin setting APIs', () => {
   const { services, cleanup } = loadServicesWithStorage()
 
-  assert.equal(typeof services.getUiSettings, 'function')
-  assert.equal(typeof services.saveUiSettings, 'function')
-  assert.equal(typeof services.getPluginSettings, 'function')
-  assert.equal(typeof services.savePluginSettings, 'function')
-
-  assert.equal(typeof services.getBookmarkSettings, 'function')
-  assert.equal(typeof services.saveBookmarkSettings, 'function')
-  assert.equal(typeof services.resetBookmarkSettings, 'function')
-  assert.equal(typeof services.getBookmarkCache, 'function')
-  assert.equal(typeof services.saveBookmarkCache, 'function')
-  assert.equal(typeof services.clearBookmarkCache, 'function')
-  assert.equal(typeof services.getBookmarkUiSettings, 'function')
-  assert.equal(typeof services.saveBookmarkUiSettings, 'function')
-  assert.equal(typeof services.getPinnedBookmarks, 'function')
-  assert.equal(typeof services.togglePinnedBookmarkState, 'function')
-  assert.equal(typeof services.getRecentOpenedBookmarks, 'function')
-  assert.equal(typeof services.openBookmarkUrl, 'function')
-  assert.equal(typeof services.loadChromeBookmarks, 'function')
+  assert.deepEqual(Object.keys(services).sort(), [
+    'getPluginSettings',
+    'getUiSettings',
+    'savePluginSettings',
+    'saveUiSettings',
+  ])
 
   cleanup()
 })
 
-test('legacy saveBookmarkUiSettings reflects the toggled values in its return payload', () => {
-  const { services, cleanup } = loadServicesWithStorage()
-
-  assert.deepEqual(
-    services.saveBookmarkUiSettings({
-      showRecentOpened: false,
-      showOpenCount: false,
-    }),
-    {
-      showRecentOpened: false,
-      showOpenCount: false,
-      themeMode: 'system',
-      windowHeight: 640,
+test('getUiSettings reads normalized values from storage', () => {
+  const { services, cleanup } = loadServicesWithStorage({
+    'screen-shot-translation-ui-settings': {
+      themeMode: 'dark',
+      windowHeight: 1200,
     },
-  )
+  })
+
+  assert.deepEqual(services.getUiSettings(), {
+    themeMode: 'dark',
+    windowHeight: 960,
+  })
 
   cleanup()
 })
 
-test('loadChromeBookmarks throws a controlled transition error', () => {
-  const { services, cleanup } = loadServicesWithStorage()
+test('saveUiSettings merges partial updates with the persisted ui settings', () => {
+  const { services, storage, cleanup } = loadServicesWithStorage({
+    'screen-shot-translation-ui-settings': {
+      themeMode: 'light',
+      windowHeight: 720,
+    },
+  })
 
-  assert.throws(
-    () => services.loadChromeBookmarks('/tmp/bookmarks'),
-    /旧书签预加载桥接已停用/,
-  )
+  const result = services.saveUiSettings({
+    windowHeight: 300,
+  })
+
+  assert.deepEqual(result, {
+    themeMode: 'light',
+    windowHeight: 480,
+  })
+  assert.deepEqual(storage.get('screen-shot-translation-ui-settings'), result)
+
+  cleanup()
+})
+
+test('getPluginSettings reads normalized values from storage', () => {
+  const { services, cleanup } = loadServicesWithStorage({
+    'screen-shot-translation-settings': {
+      sourceLanguage: ' en ',
+      targetLanguage: 'ja',
+      pinPreviewMode: 'floating',
+    },
+  })
+
+  assert.deepEqual(services.getPluginSettings(), {
+    sourceLanguage: 'en',
+    targetLanguage: 'ja',
+    pinPreviewMode: 'overlay',
+  })
 
   cleanup()
 })
