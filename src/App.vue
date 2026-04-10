@@ -26,6 +26,7 @@ import {
   createEmptyWorkflowResult,
   createMainWorkflowResetState,
   resolvePluginEnterTransition,
+  resolveWorkflowResetTransition,
 } from './screenTranslation/entryFlow.js'
 
 type ServicesBridge = {
@@ -316,13 +317,13 @@ function startPin() {
 
 // 进入设置页前先把主流程收干净，避免返回首页时沿用旧步骤。
 function openSettings() {
-  resetMainWorkflowState()
+  applyMainWorkflowResetState(resolveWorkflowResetTransition('settings').workflowResetState)
   currentView.value = 'settings'
 }
 
 // 返回首页时统一回到新的截屏起点，避免 settings / records 把旧步骤带回来。
 function goHome() {
-  resetMainWorkflowState()
+  applyMainWorkflowResetState(resolveWorkflowResetTransition('home').workflowResetState)
   currentView.value = 'home'
 }
 

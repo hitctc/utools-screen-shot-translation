@@ -25,28 +25,30 @@ export function createUnknownPluginEnterResult(code) {
   }
 }
 
+export function resolveWorkflowResetTransition(nextView) {
+  return {
+    nextView,
+    workflowResetState: createMainWorkflowResetState(),
+    workflowResult: createEmptyWorkflowResult(),
+  }
+}
+
 export function resolvePluginEnterTransition(code) {
   switch (code) {
     case 'screen-shot-translation-settings':
       return {
-        nextView: 'settings',
-        workflowResetState: createMainWorkflowResetState(),
-        workflowResult: createEmptyWorkflowResult(),
+        ...resolveWorkflowResetTransition('settings'),
         refreshRecords: false,
       }
     case 'screen-shot-translation-records':
       return {
-        nextView: 'records',
-        workflowResetState: createMainWorkflowResetState(),
-        workflowResult: createEmptyWorkflowResult(),
+        ...resolveWorkflowResetTransition('records'),
         refreshRecords: true,
       }
     case 'screen-shot-translation-run':
     case undefined:
       return {
-        nextView: 'home',
-        workflowResetState: createMainWorkflowResetState(),
-        workflowResult: createEmptyWorkflowResult(),
+        ...resolveWorkflowResetTransition('home'),
         refreshRecords: false,
       }
     default:

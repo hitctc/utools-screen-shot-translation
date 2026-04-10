@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 import {
   createMainWorkflowResetState,
   createUnknownPluginEnterResult,
   resolvePluginEnterTransition,
+  resolveWorkflowResetTransition,
 } from '../src/screenTranslation/entryFlow.js'
+
+const pluginJsonPath = fileURLToPath(new URL('../public/plugin.json', import.meta.url))
+const pluginManifest = JSON.parse(readFileSync(pluginJsonPath, 'utf8'))
 
 test('resolvePluginEnterTransition maps feature codes to the expected views and reset state', () => {
   const runTransition = resolvePluginEnterTransition('screen-shot-translation-run')
@@ -47,4 +53,44 @@ test('unknown plugin enter code resolves to result state with an explicit messag
   assert.equal(transition.nextView, 'result')
   assert.equal(transition.workflowResetState, null)
   assert.deepEqual(transition.workflowResult, createUnknownPluginEnterResult('screen-shot-translation-unknown'))
+})
+
+test('plugin manifest feature codes stay aligned with the entry flow dispatcher', () => {
+  const manifestCodes = pluginManifest.features.map((feature) => feature.code)
+
+  assert.deepEqual(manifestCodes, [
+    'screen-shot-translation-run',
+    'screen-shot-translation-records',
+    'screen-shot-translation-settings',
+  ])
+
+  for (const code of manifestCodes) {
+    const transition = resolvePluginEnterTransition(code)
+
+    assert.notEqual(transition.nextView, 'result')
+    assert.equal(transition.workflowResetState.currentStep, 'capture')
+    assert.equal(transition.workflowResetState.processing, false)
+  }
+})
+
+test('go-home and open-settings style transitions both reset to capture before switching views', () => {
+  const homeTransition = resolveWorkflowResetTransition('home')
+  const settingsTransition = resolveWorkflowResetTransition('settings')
+
+  assert.equal(homeTransition.nextView, 'home')
+  assert.equal(settingsTransition.nextView, 'settings')
+  assert.deepEqual(homeTransition.workflowResetState, createMainWorkflowResetState())
+  assert.deepEqual(settingsTransition.workflowResetState, createMainWorkflowResetState())
+  assert.deepEqual(homeTransition.workflowResult, {
+    visible: false,
+    code: '',
+    title: '',
+    message: '',
+  })
+  assert.deepEqual(settingsTransition.workflowResult, {
+    visible: false,
+    code: '',
+    title: '',
+    message: '',
+  })
 })
