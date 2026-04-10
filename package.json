@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test tests/preload/*.test.mjs tests/entryFlow.test.mjs"
+    "test": "node --test tests/preload/*.test.mjs tests/*.test.mjs"
   },
   "dependencies": {
     "vue": "^3.5.13"

@@ -23,11 +23,13 @@ import {
   syncPrefersDarkState,
 } from './screenTranslation/theme.js'
 import {
-  createEmptyWorkflowResult,
-  createMainWorkflowResetState,
   resolvePluginEnterTransition,
-  resolveWorkflowResetTransition,
 } from './screenTranslation/entryFlow.js'
+import {
+  applyPluginEnterTransitionToAppState,
+  applyViewResetToAppState,
+  createResetAppState,
+} from './screenTranslation/appState.js'
 
 type ServicesBridge = {
   getUiSettings?: () => UiSettings
@@ -50,7 +52,7 @@ const currentStep = ref<ScreenTranslationStep>('capture')
 const processing = ref(false)
 const uiSettings = ref<UiSettings>({ ...DEFAULT_UI_SETTINGS })
 const pluginSettings = ref<PluginSettings>({ ...DEFAULT_PLUGIN_SETTINGS })
-const workflowResult = ref<WorkflowResultState>(createEmptyWorkflowResult())
+const workflowResult = ref<WorkflowResultState>(createResetAppState('home').workflowResult)
 const prefersDark = ref(false)
 const previewWarningMessage = ref('')
 let systemThemeQuery: MediaQueryList | null = null
@@ -163,16 +165,7 @@ function syncUiPresentation() {
 
 // 统一的结果态先放在 App 里，后续失败码和结果页都沿着这个对象继续长。
 function resetWorkflowResult() {
-  workflowResult.value = createEmptyWorkflowResult()
-}
-
-// 主流程状态只收口到一个地方，避免设置页和记录页把旧步骤带回首页。
-function resetMainWorkflowState() {
-  const nextState = createMainWorkflowResetState()
-
-  currentStep.value = nextState.currentStep
-  processing.value = nextState.processing
-  resetWorkflowResult()
+  workflowResult.value = createResetAppState('home').workflowResult
 }
 
 // 主流程失败时先把信息收口到一个结果对象，避免页面上散落多段临时文案。
@@ -195,11 +188,22 @@ function readPersistedState() {
   syncUiPresentation()
 }
 
-// 入口分发会先给出一份 reset 结果，这里只负责把它写回当前运行态。
-function applyMainWorkflowResetState(nextState: ReturnType<typeof createMainWorkflowResetState>) {
+// App 只保留一个很薄的写回层，具体怎么重置由适配模块决定。
+function syncAppState(nextState: ReturnType<typeof createResetAppState>) {
+  currentView.value = nextState.currentView
   currentStep.value = nextState.currentStep
   processing.value = nextState.processing
-  resetWorkflowResult()
+  workflowResult.value = nextState.workflowResult
+}
+
+// 先把当前运行态快照出来，再交给适配模块算下一帧状态。
+function snapshotAppState() {
+  return {
+    currentView: currentView.value,
+    currentStep: currentStep.value,
+    processing: processing.value,
+    workflowResult: workflowResult.value,
+  }
 }
 
 // 入口分发先放到一个地方，后面接 records 和 result 页面时就不用再拆逻辑。
@@ -207,16 +211,7 @@ function handlePluginEnter({ code }: { code?: ScreenTranslationFeatureCode } = {
   readPersistedState()
 
   const transition = resolvePluginEnterTransition(code)
-
-  if (transition.workflowResetState) {
-    applyMainWorkflowResetState(transition.workflowResetState)
-  }
-
-  if (transition.workflowResult.visible) {
-    workflowResult.value = transition.workflowResult
-  }
-
-  currentView.value = transition.nextView
+  syncAppState(applyPluginEnterTransitionToAppState(snapshotAppState(), transition))
 
   if (transition.refreshRecords) {
     void refreshRecords()
@@ -317,14 +312,12 @@ function startPin() {
 
 // 进入设置页前先把主流程收干净，避免返回首页时沿用旧步骤。
 function openSettings() {
-  applyMainWorkflowResetState(resolveWorkflowResetTransition('settings').workflowResetState)
-  currentView.value = 'settings'
+  syncAppState(applyViewResetToAppState(snapshotAppState(), 'settings'))
 }
 
 // 返回首页时统一回到新的截屏起点，避免 settings / records 把旧步骤带回来。
 function goHome() {
-  applyMainWorkflowResetState(resolveWorkflowResetTransition('home').workflowResetState)
-  currentView.value = 'home'
+  syncAppState(applyViewResetToAppState(snapshotAppState(), 'home'))
 }
 
 // 记录页目前只做入口占位，后续接入真实记录数据时再把刷新逻辑补完整。
@@ -334,8 +327,7 @@ async function refreshRecords() {
 
 // 主入口先回到首页骨架，后面真正的截屏、翻译和钉住流程都从这里扩展。
 async function runMainWorkflow() {
-  resetMainWorkflowState()
-  currentView.value = 'home'
+  syncAppState(applyViewResetToAppState(snapshotAppState(), 'home'))
 }
 
 // UI 设置优先写回 preload；没有 bridge 时就用本地兜底结构保证界面还能预览。
