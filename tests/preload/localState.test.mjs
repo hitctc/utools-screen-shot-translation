@@ -13,9 +13,12 @@ const {
 
 function loadServicesWithStorage(initialStorage = {}, options = {}) {
   const servicesModulePath = path.resolve('public/preload/services.js')
+  const credentialStoreModulePath = path.resolve('public/preload/translationCredentialStore.cjs')
   delete require.cache[servicesModulePath]
+  delete require.cache[credentialStoreModulePath]
 
   const storage = new Map(Object.entries(initialStorage))
+  let credentialDoc = options.translationCredentialDoc ?? null
   global.window = {
     utools: {
       showOpenDialog: options.showOpenDialog ?? (async () => []),
@@ -28,6 +31,23 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
           storage.set(key, value)
         },
       },
+      db: {
+        get(id) {
+          return credentialDoc && credentialDoc._id === id ? credentialDoc : null
+        },
+        put(doc) {
+          credentialDoc = {
+            ...doc,
+            _rev: options.translationCredentialRev ?? '2-rev',
+          }
+
+          return {
+            ok: true,
+            id: doc._id,
+            rev: credentialDoc._rev,
+          }
+        },
+      },
     },
   }
 
@@ -36,9 +56,13 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
   return {
     services: global.window.services,
     storage,
+    getCredentialDoc() {
+      return credentialDoc
+    },
     cleanup() {
       delete global.window
       delete require.cache[servicesModulePath]
+      delete require.cache[credentialStoreModulePath]
     },
   }
 }
@@ -120,12 +144,14 @@ test('services exposes the plugin settings and record store bridge', () => {
   assert.deepEqual(Object.keys(services).sort(), [
     'deleteSavedRecord',
     'getPluginSettings',
+    'getTranslationCredentials',
     'getUiSettings',
     'listSavedRecords',
     'pickSaveDirectory',
     'repinSavedRecord',
     'runCaptureTranslationPin',
     'savePluginSettings',
+    'saveTranslationCredentials',
     'saveUiSettings',
   ])
 
@@ -318,6 +344,59 @@ test('savePluginSettings keeps existing save directory when partial value is not
     confirmBeforeDelete: false,
   })
   assert.deepEqual(storage.get('screen-shot-translation-settings'), result)
+
+  cleanup()
+})
+
+test('getTranslationCredentials reads the synced baidu credentials document', () => {
+  const { services, cleanup } = loadServicesWithStorage(
+    {},
+    {
+      translationCredentialDoc: {
+        _id: 'screen-shot-translation/translation-credentials',
+        _rev: '1-rev',
+        appId: ' sync-app-id ',
+        appKey: ' sync-app-key ',
+      },
+    },
+  )
+
+  assert.deepEqual(services.getTranslationCredentials(), {
+    appId: 'sync-app-id',
+    appKey: 'sync-app-key',
+  })
+
+  cleanup()
+})
+
+test('saveTranslationCredentials merges and persists the synced baidu credentials document', () => {
+  const { services, getCredentialDoc, cleanup } = loadServicesWithStorage(
+    {},
+    {
+      translationCredentialDoc: {
+        _id: 'screen-shot-translation/translation-credentials',
+        _rev: '1-rev',
+        appId: 'existing-app-id',
+        appKey: '',
+      },
+    },
+  )
+
+  const result = services.saveTranslationCredentials({
+    appKey: ' sync-app-key ',
+  })
+
+  assert.deepEqual(result, {
+    appId: 'existing-app-id',
+    appKey: 'sync-app-key',
+  })
+  assert.deepEqual(getCredentialDoc(), {
+    _id: 'screen-shot-translation/translation-credentials',
+    _rev: '2-rev',
+    appId: 'existing-app-id',
+    appKey: 'sync-app-key',
+    updatedAt: getCredentialDoc().updatedAt,
+  })
 
   cleanup()
 })

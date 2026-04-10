@@ -1,7 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { getSaveDirectoryWarning, normalizePluginSettings } from '../src/screenTranslation/pluginSettings.js'
+import {
+  getSaveDirectoryWarning,
+  getTranslationCredentialWarning,
+  normalizePluginSettings,
+  normalizeTranslationCredentials,
+} from '../src/screenTranslation/pluginSettings.js'
 
 test('normalizePluginSettings ignores old plugin setting fields and keeps the new contract', () => {
   assert.deepEqual(
@@ -40,6 +45,37 @@ test('getSaveDirectoryWarning surfaces the missing directory state only when nee
       saveTranslatedImage: false,
       saveDirectory: '',
       confirmBeforeDelete: true,
+    }),
+    '',
+  )
+})
+
+test('normalizeTranslationCredentials trims the synced baidu credentials', () => {
+  assert.deepEqual(
+    normalizeTranslationCredentials({
+      appId: '  app-id  ',
+      appKey: '  app-key  ',
+    }),
+    {
+      appId: 'app-id',
+      appKey: 'app-key',
+    },
+  )
+})
+
+test('getTranslationCredentialWarning surfaces the half-filled credential state only when needed', () => {
+  assert.equal(
+    getTranslationCredentialWarning({
+      appId: 'app-id',
+      appKey: '',
+    }),
+    '百度图片翻译凭证尚未填写完整，请同时提供 AppID 和 AppKey。',
+  )
+
+  assert.equal(
+    getTranslationCredentialWarning({
+      appId: 'app-id',
+      appKey: 'app-key',
     }),
     '',
   )

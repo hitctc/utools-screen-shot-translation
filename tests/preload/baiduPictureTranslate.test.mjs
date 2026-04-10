@@ -17,7 +17,10 @@ test('translateCapturedImage returns translation-config-invalid when credentials
     settings: {
       translationMode: 'en-to-zh',
     },
-    env: {},
+    credentials: {
+      appId: '',
+      appKey: '',
+    },
     requestImpl: async () => {
       throw new Error('request should not run without credentials')
     },
@@ -40,9 +43,9 @@ test('translateCapturedImage sends the expected direction and returns the pasted
     settings: {
       translationMode: 'en-to-zh',
     },
-    env: {
-      BAIDU_FANYI_APP_ID: 'test-app-id',
-      BAIDU_FANYI_APP_KEY: 'test-app-key',
+    credentials: {
+      appId: 'test-app-id',
+      appKey: 'test-app-key',
     },
     createSalt: () => 'salt-001',
     requestImpl: async (request) => {
@@ -95,9 +98,9 @@ test('translateCapturedImage retries with the opposite direction when auto mode 
     settings: {
       translationMode: 'auto',
     },
-    env: {
-      BAIDU_FANYI_APP_ID: 'test-app-id',
-      BAIDU_FANYI_APP_KEY: 'test-app-key',
+    credentials: {
+      appId: 'test-app-id',
+      appKey: 'test-app-key',
     },
     requestImpl: async (request) => {
       requests.push(`${request.from}->${request.to}`)
@@ -137,4 +140,45 @@ test('translateCapturedImage retries with the opposite direction when auto mode 
   assert.equal(result.to, 'zh')
   assert.equal(result.translatedText, '你好，世界')
   assert.equal(result.translatedImageBase64, 'c2Vjb25k')
+})
+
+test('translateCapturedImage still falls back to environment credentials for development runs', async () => {
+  const requests = []
+
+  const result = await translateCapturedImage({
+    captureResult: {
+      ok: true,
+      image: 'data:image/png;base64,aGVsbG8=',
+    },
+    settings: {
+      translationMode: 'zh-to-en',
+    },
+    credentials: {
+      appId: '',
+      appKey: '',
+    },
+    env: {
+      BAIDU_FANYI_APP_ID: 'env-app-id',
+      BAIDU_FANYI_APP_KEY: 'env-app-key',
+    },
+    requestImpl: async (request) => {
+      requests.push(request)
+      return {
+        error_code: '0',
+        error_msg: 'success',
+        data: {
+          from: 'zh',
+          to: 'en',
+          sumSrc: '你好',
+          sumDst: 'Hello',
+          pasteImg: 'ZW52LXBhc3Rl',
+          content: [],
+        },
+      }
+    },
+  })
+
+  assert.equal(requests[0].appId, 'env-app-id')
+  assert.equal(result.ok, true)
+  assert.equal(result.translatedText, 'Hello')
 })

@@ -34,6 +34,11 @@ export type PluginSettings = {
   confirmBeforeDelete: boolean
 }
 
+export type TranslationCredentials = {
+  appId: string
+  appKey: string
+}
+
 export type WorkflowResultPresentation = {
   title: string
   message: string
@@ -52,6 +57,11 @@ export const DEFAULT_PLUGIN_SETTINGS: PluginSettings = {
   saveTranslatedImage: false,
   saveDirectory: '',
   confirmBeforeDelete: true,
+}
+
+export const DEFAULT_TRANSLATION_CREDENTIALS: TranslationCredentials = {
+  appId: '',
+  appKey: '',
 }
 
 export const WINDOW_HEIGHT_MIN = 480

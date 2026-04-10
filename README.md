@@ -13,6 +13,7 @@
   - `saveTranslatedImage`
   - `saveDirectory`
   - `confirmBeforeDelete`
+  - `百度 AppID / AppKey`
   - `themeMode`
   - `windowHeight`
 - `钉住记录` 页已支持：
@@ -26,6 +27,7 @@
   - 目录选择桥接
   - 真实截图桥接
   - 百度图片翻译桥接
+  - 百度凭证同步存储
   - 主流程失败归因
   - 重钉失败闭环占位
 
@@ -34,12 +36,14 @@
 - 真实钉住窗口与重钉
 - 主流程成功时“无页面直接完成”的最终闭环
 
-当前接入百度图片翻译前，需要先给 uTools 进程提供这两个环境变量：
+当前推荐直接在设置页填写百度图片翻译凭证。凭证会保存到 uTools 同步数据库，并随同一账号在多设备间同步。
+
+开发态仍保留环境变量兜底，未在设置页填写时会继续尝试读取：
 
 - `BAIDU_FANYI_APP_ID`
 - `BAIDU_FANYI_APP_KEY`
 
-如果环境变量未提供，`截屏翻译钉住` 在截图完成后会进入 `translation-config-invalid` 失败结果页。
+如果设置页和环境变量都没有提供完整凭证，`截屏翻译钉住` 在截图完成后会进入 `translation-config-invalid` 失败结果页。
 
 常用命令：
 

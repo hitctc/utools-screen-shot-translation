@@ -9,12 +9,14 @@ import {
   WINDOW_HEIGHT_STEP,
   type PluginSettings,
   type ThemeMode,
+  type TranslationCredentials,
   type UiSettings,
 } from './types'
-import { getSaveDirectoryWarning } from './pluginSettings.js'
+import { getSaveDirectoryWarning, getTranslationCredentialWarning } from './pluginSettings.js'
 
 const props = defineProps<{
   pluginSettings: PluginSettings
+  translationCredentials: TranslationCredentials
   uiSettings: UiSettings
   themeStatus: string
 }>()
@@ -23,6 +25,7 @@ const emit = defineEmits<{
   (event: 'back'): void
   (event: 'pick-save-directory'): void
   (event: 'save-plugin-settings', payload: Partial<PluginSettings>): void
+  (event: 'save-translation-credentials', payload: Partial<TranslationCredentials>): void
   (event: 'save-ui-settings', payload: Partial<UiSettings>): void
 }>()
 
@@ -46,6 +49,10 @@ function emitConfirmBeforeDeleteChange(confirmBeforeDelete: boolean) {
   emitPluginSettingChange({ confirmBeforeDelete })
 }
 
+function emitTranslationCredentialChange(partial: Partial<TranslationCredentials>) {
+  emit('save-translation-credentials', partial)
+}
+
 function emitThemeModeChange(themeMode: ThemeMode) {
   emit('save-ui-settings', { themeMode })
 }
@@ -59,6 +66,7 @@ function emitResetWindowHeight() {
 }
 
 const saveDirectoryWarning = computed(() => getSaveDirectoryWarning(props.pluginSettings))
+const translationCredentialWarning = computed(() => getTranslationCredentialWarning(props.translationCredentials))
 </script>
 
 <template>
@@ -80,6 +88,44 @@ const saveDirectoryWarning = computed(() => getSaveDirectoryWarning(props.plugin
     </header>
 
     <section class="settings-grid">
+      <article class="settings-card">
+        <div class="settings-card__header">
+          <div>
+            <p class="group-title">百度图片翻译凭证</p>
+            <p class="group-copy">这里填写的 AppID 和 AppKey 会保存到 uTools 同步数据库，并跟随同一账号在多设备间同步。</p>
+          </div>
+          <span class="status-chip">
+            {{ props.translationCredentials.appId && props.translationCredentials.appKey ? '已配置' : '未配置' }}
+          </span>
+        </div>
+
+        <label class="field">
+          <span class="field__label">baiduAppId</span>
+          <input
+            class="field__control"
+            type="text"
+            :value="props.translationCredentials.appId"
+            placeholder="请输入百度图片翻译 AppID"
+            @input="emitTranslationCredentialChange({ appId: ($event.target as HTMLInputElement).value })"
+          />
+        </label>
+
+        <label class="field">
+          <span class="field__label">baiduAppKey</span>
+          <input
+            class="field__control"
+            type="password"
+            :value="props.translationCredentials.appKey"
+            placeholder="请输入百度图片翻译 AppKey"
+            @input="emitTranslationCredentialChange({ appKey: ($event.target as HTMLInputElement).value })"
+          />
+        </label>
+
+        <p v-if="translationCredentialWarning" class="field__hint field__hint--warning">
+          {{ translationCredentialWarning }}
+        </p>
+      </article>
+
       <article class="settings-card">
         <div class="settings-card__header">
           <div>

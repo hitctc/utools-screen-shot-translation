@@ -6,9 +6,9 @@ import { mapSavedRecordToViewRecord, mapWorkflowFailureToResult } from '../src/s
 test('mapWorkflowFailureToResult explains missing translation credentials explicitly', () => {
   assert.deepEqual(mapWorkflowFailureToResult('translation-config-invalid'), {
     title: '翻译配置不完整',
-    message: '当前环境还没有配置百度图片翻译凭证，请先提供 BAIDU_FANYI_APP_ID 和 BAIDU_FANYI_APP_KEY。',
+    message: '当前还没有在设置页填写完整的百度图片翻译凭证，请先补全 AppID 和 AppKey。',
     showRetry: true,
-    showOpenSettings: false,
+    showOpenSettings: true,
     showClose: true,
   })
 })

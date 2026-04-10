@@ -35,6 +35,7 @@
     - `screen-shot-translation-settings` -> `设置`
   - `钉住记录` 页面已从保存目录总清单读取记录并渲染瀑布流卡片
   - `设置` 页面已承载翻译方向、保存结果图片、保存目录、删除前二次确认，以及主题模式和窗口高度
+  - 设置页已可填写百度图片翻译 `AppID / AppKey`
   - `失败结果页` 已承载主流程失败、重钉失败和未知失败码的统一文案与动作
   - 支持 `跟随系统 / 深色 / 浅色` 三态主题
   - 支持在系统主题变化时同步刷新页面主题和状态文案
@@ -44,10 +45,11 @@
   - 插件设置模型已切到 `translationMode / saveTranslatedImage / saveDirectory / confirmBeforeDelete`，`preload` 侧已完成归一化和测试收口
   - `public/preload/recordStore.cjs` 已接通保存目录总清单的读取、整理和删除
   - `public/preload/baiduPictureTranslate.cjs` 已接通百度图片翻译签名、请求发送和自动方向选择
+  - `public/preload/translationCredentialStore.cjs` 已接通百度凭证同步文档的读取与更新
   - `public/preload/services.js` 已暴露 `pickSaveDirectory / listSavedRecords / deleteSavedRecord / repinSavedRecord / runCaptureTranslationPin`
 - 当前明确限制：
   - 还没有实现真正的图片钉住窗口
-  - 真实翻译目前只接了百度图片翻译，且依赖 `BAIDU_FANYI_APP_ID / BAIDU_FANYI_APP_KEY`
+  - 真实翻译目前只接了百度图片翻译，优先读取设置页同步的 `AppID / AppKey`，开发态仍支持 `BAIDU_FANYI_APP_ID / BAIDU_FANYI_APP_KEY` 兜底
   - `runCaptureTranslationPin` 当前已能完成 `截屏 -> 翻译`，但仍不会真正钉住成功
   - `repinSavedRecord` 仍是诚实占位：当前只会返回 `repin-failed`
 - 当前技术栈：`Vue 3 + Vite 6 + @vitejs/plugin-vue + utools-api-types + Node built-in node:test`
@@ -66,9 +68,11 @@
 - `public/preload/package.json`
   固定 `preload` 目录使用 `commonjs`，不要在这里随意切成 ESM。
 - `public/preload/services.js`
-  负责桥接 `utools.dbStorage`、目录选择、记录读取/删除、真实截图入口、百度翻译入口和重钉占位，并通过 `window.services` 暴露前端可消费的接口。
+  负责桥接 `utools.dbStorage`、`utools.db`、目录选择、记录读取/删除、真实截图入口、百度翻译入口和重钉占位，并通过 `window.services` 暴露前端可消费的接口。
 - `public/preload/baiduPictureTranslate.cjs`
   负责百度图片翻译的图片解码、签名、请求发送和自动方向选择。
+- `public/preload/translationCredentialStore.cjs`
+  负责百度凭证同步文档的读取、归一化和更新。
 - `public/preload/localState.cjs`
   负责 UI 设置与插件设置的归一化规则，包括主题模式、窗口高度，以及翻译保存相关的 `translationMode`、`saveTranslatedImage`、`saveDirectory` 和 `confirmBeforeDelete`。
 - `public/preload/recordStore.cjs`
@@ -80,7 +84,7 @@
 - `src/screenTranslation/HomeView.vue`
   当前记录页视图，负责展示瀑布流记录卡片、空态、warning、删除按钮和设置入口。
 - `src/screenTranslation/SettingsView.vue`
-  设置页视图，负责翻译方向、保存结果图片、保存目录、删除前二次确认，以及主题模式和窗口高度的配置展示。
+  设置页视图，负责百度凭证、翻译方向、保存结果图片、保存目录、删除前二次确认，以及主题模式和窗口高度的配置展示。
 - `src/screenTranslation/ResultView.vue`
   失败结果页视图，负责展示统一失败文案和 `retry / open-settings / close` 动作。
 - `src/screenTranslation/viewState.js`
@@ -96,7 +100,9 @@
 - `src/main.css`
   当前截屏翻译工具骨架页的基础样式和主题 token。
 - `tests/preload/localState.test.mjs`
-  负责当前 `preload` 正式保留的设置归一化与读写合并语义测试，包括目录选择、重钉占位桥接和局部更新持久化。
+  负责当前 `preload` 正式保留的设置归一化与读写合并语义测试，包括目录选择、同步凭证桥接、重钉占位桥接和局部更新持久化。
+- `tests/preload/translationCredentialStore.test.mjs`
+  负责百度凭证同步文档的读写与局部更新测试。
 - `tests/preload/recordStore.test.mjs`
   负责保存目录总清单的读写、清理、删除和路径安全边界测试。
 - `tests/preload/workflow.test.mjs`
@@ -169,6 +175,7 @@
 5. 点击 `接入开发`
 6. 在 uTools 中通过 `钉住记录`、`设置`、`截屏翻译钉住` 三个指令验证不同入口
 7. 如果要验证真实翻译，先确保 uTools 进程环境里已经存在 `BAIDU_FANYI_APP_ID` 和 `BAIDU_FANYI_APP_KEY`
+   如果已经在设置页填写完整百度凭证，则无需再依赖环境变量。
 8. 改 `src/` 下的前端代码时，Vite 会热更新，回到插件窗口即可看到界面变化
 9. 需要看控制台、报错、网络请求或 DOM 时，进入插件后打开 `开发者工具`
 10. 确认 `钉住记录` 页面展示瀑布流记录或受控空态，而不是旧的三步流首页
@@ -215,12 +222,12 @@
 14. 如果保存目录下已有记录，点击缩略图或“重新钉住”，确认进入失败结果页并看到 `repin-failed` 失败闭环
 15. 如果保存目录下已有记录，打开/关闭“删除前二次确认”后删除一条记录，确认确认框行为符合设置
 16. 通过 `截屏翻译钉住` 进入插件：
-   如果未配置百度凭证，应在截图后进入 `translation-config-invalid` 失败结果页。
+   如果设置页和环境变量都未配置百度凭证，应在截图后进入 `translation-config-invalid` 失败结果页，并可直接跳设置页补全。
    如果已配置百度凭证且翻译成功，应继续走到当前的 `pin-failed` 占位失败闭环，而不是假装成功。
 
 ## 6. 配置与安全约束
 
-- 当前图片翻译需要通过环境变量提供百度凭证：`BAIDU_FANYI_APP_ID`、`BAIDU_FANYI_APP_KEY`。
+- 当前图片翻译优先读取设置页里通过 `utools.db` 同步的百度凭证；开发态仍可通过环境变量 `BAIDU_FANYI_APP_ID`、`BAIDU_FANYI_APP_KEY` 兜底。
 - 不要把 secrets、tokens、cookies、授权码、私有路径或测试账号写进仓库。
 - 当前 `preload` 只暴露设置读写能力；新增系统调用时优先控制边界，不要默认把过多系统权限直接暴露给前端。
 - 当前设置通过 `utools.dbStorage` 保存；如果后续接入图片缓存、OCR 结果缓存或钉住窗口状态，先明确哪些可以同步、哪些只能本机保存。
@@ -263,7 +270,8 @@
   - 静态首屏壳子
   - 记录页 / 设置页 / 失败结果页三种承载面
   - `uTools.screenCapture` 真实截图桥接
-  - 百度图片翻译真实调用（依赖环境变量凭证）
+  - 百度图片翻译真实调用（优先读取设置页同步凭证，开发态支持环境变量兜底）
+  - 设置页百度凭证输入与 `utools.db` 同步存储
   - `跟随系统 / 深色 / 浅色` 三态主题
   - 主插件窗口高度设置与持久化
   - `translationMode`、`saveTranslatedImage`、`saveDirectory`、`confirmBeforeDelete` 插件设置与持久化

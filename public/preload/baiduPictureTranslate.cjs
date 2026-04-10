@@ -11,6 +11,16 @@ const BAIDU_ENV_KEYS = {
   appKey: 'BAIDU_FANYI_APP_KEY',
 }
 
+// 同步凭证和环境变量都可能作为输入，这里统一做最小归一化。
+function normalizeCredentials(raw) {
+  const candidate = raw && typeof raw === 'object' ? raw : {}
+
+  return {
+    appId: typeof candidate.appId === 'string' ? candidate.appId.trim() : '',
+    appKey: typeof candidate.appKey === 'string' ? candidate.appKey.trim() : '',
+  }
+}
+
 // 图片翻译桥接只接受当前产品定义的三种模式，其他值统一回退成自动。
 function normalizeTranslationMode(value) {
   if (value === 'en-to-zh' || value === 'zh-to-en') {
@@ -311,13 +321,20 @@ async function translateAutoMode({
 async function translateCapturedImage({
   captureResult,
   settings,
+  credentials,
   env = process.env,
   requestImpl = requestBaiduPictureTranslate,
   createSalt = () => `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`,
 } = {}) {
-  const appId = typeof env?.[BAIDU_ENV_KEYS.appId] === 'string' ? env[BAIDU_ENV_KEYS.appId].trim() : ''
-  const appKey = typeof env?.[BAIDU_ENV_KEYS.appKey] === 'string' ? env[BAIDU_ENV_KEYS.appKey].trim() : ''
-  if (!appId || !appKey) {
+  const syncedCredentials = normalizeCredentials(credentials)
+  const envCredentials = normalizeCredentials({
+    appId: env?.[BAIDU_ENV_KEYS.appId],
+    appKey: env?.[BAIDU_ENV_KEYS.appKey],
+  })
+  const resolvedCredentials =
+    syncedCredentials.appId && syncedCredentials.appKey ? syncedCredentials : envCredentials
+
+  if (!resolvedCredentials.appId || !resolvedCredentials.appKey) {
     return {
       ok: false,
       code: 'translation-config-invalid',
@@ -332,13 +349,12 @@ async function translateCapturedImage({
     }
   }
 
-  const credentials = { appId, appKey }
   const translationMode = normalizeTranslationMode(settings?.translationMode)
 
   if (translationMode === 'en-to-zh') {
     return translateWithDirection({
       direction: { from: 'en', to: 'zh' },
-      credentials,
+      credentials: resolvedCredentials,
       captureImage,
       requestImpl,
       createSalt,
@@ -348,7 +364,7 @@ async function translateCapturedImage({
   if (translationMode === 'zh-to-en') {
     return translateWithDirection({
       direction: { from: 'zh', to: 'en' },
-      credentials,
+      credentials: resolvedCredentials,
       captureImage,
       requestImpl,
       createSalt,
@@ -356,7 +372,7 @@ async function translateCapturedImage({
   }
 
   return translateAutoMode({
-    credentials,
+    credentials: resolvedCredentials,
     captureImage,
     requestImpl,
     createSalt,

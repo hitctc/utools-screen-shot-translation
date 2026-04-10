@@ -6,6 +6,10 @@ const {
 const { listSavedRecords, deleteSavedRecord } = require('./recordStore.cjs')
 const { runMainWorkflow } = require('./workflow.cjs')
 const { translateCapturedImage } = require('./baiduPictureTranslate.cjs')
+const {
+  getTranslationCredentials,
+  saveTranslationCredentials,
+} = require('./translationCredentialStore.cjs')
 const fs = require('fs')
 const path = require('path')
 
@@ -63,9 +67,20 @@ function savePluginSettings(partial) {
   return next
 }
 
+// 百度凭证单独放到同步数据库文档，避免和普通 UI/插件开关混在一起。
+function readTranslationCredentials() {
+  return getTranslationCredentials(window.utools?.db)
+}
+
+// 设置页写凭证时也走同一份同步文档，便于多设备跟着 uTools 账号同步。
+function writeTranslationCredentials(partial) {
+  return saveTranslationCredentials(window.utools?.db, partial)
+}
+
 // 主流程先接上真实截图能力，后续翻译 / 钉住 / 保存仍继续走受控占位。
 function runCaptureTranslationPin() {
   const settings = getPluginSettings()
+  const credentials = readTranslationCredentials()
 
   return runMainWorkflow({
     settings,
@@ -74,6 +89,7 @@ function runCaptureTranslationPin() {
       translateCapturedImage({
         captureResult,
         settings,
+        credentials,
       }),
     pinImage: async () => ({ ok: false, code: 'pin-failed' }),
     saveImage: async () => ({ ok: false, code: 'save-failed' }),
@@ -87,6 +103,8 @@ window.services = {
   saveUiSettings,
   getPluginSettings,
   savePluginSettings,
+  getTranslationCredentials: readTranslationCredentials,
+  saveTranslationCredentials: writeTranslationCredentials,
   // 目录选择只负责把系统选择器结果收口成单个目录字符串，取消时返回空串。
   pickSaveDirectory: async () => {
     if (!window.utools || typeof window.utools.showOpenDialog !== 'function') {

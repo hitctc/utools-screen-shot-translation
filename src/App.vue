@@ -5,6 +5,7 @@ import ResultView from './screenTranslation/ResultView.vue'
 import SettingsView from './screenTranslation/SettingsView.vue'
 import {
   DEFAULT_PLUGIN_SETTINGS,
+  DEFAULT_TRANSLATION_CREDENTIALS,
   DEFAULT_UI_SETTINGS,
   WINDOW_HEIGHT_MAX,
   WINDOW_HEIGHT_MIN,
@@ -12,6 +13,7 @@ import {
   type ScreenTranslationRecord,
   type ScreenTranslationView,
   type ThemeMode,
+  type TranslationCredentials,
   type UiSettings,
   type WorkflowFailureCode,
   type WorkflowResultPresentation,
@@ -23,7 +25,7 @@ import {
   syncPrefersDarkState,
 } from './screenTranslation/theme.js'
 import { createUnknownPluginEnterResult } from './screenTranslation/entryFlow.js'
-import { normalizePluginSettings } from './screenTranslation/pluginSettings.js'
+import { normalizePluginSettings, normalizeTranslationCredentials } from './screenTranslation/pluginSettings.js'
 import { mapSavedRecordToViewRecord, mapWorkflowFailureToResult } from './screenTranslation/viewState.js'
 
 type WorkflowBridgeResult = {
@@ -51,6 +53,8 @@ type ServicesBridge = {
   saveUiSettings?: (partial: Partial<UiSettings>) => UiSettings
   getPluginSettings?: () => PluginSettings
   savePluginSettings?: (partial: Partial<PluginSettings>) => PluginSettings
+  getTranslationCredentials?: () => TranslationCredentials
+  saveTranslationCredentials?: (partial: Partial<TranslationCredentials>) => TranslationCredentials
   pickSaveDirectory?: () => Promise<string>
   listSavedRecords?: () => Promise<SavedRecordManifest>
   deleteSavedRecord?: (recordId: string) => Promise<unknown>
@@ -63,6 +67,7 @@ const records = ref<ScreenTranslationRecord[]>([])
 const recordsLoading = ref(false)
 const uiSettings = ref<UiSettings>({ ...DEFAULT_UI_SETTINGS })
 const pluginSettings = ref<PluginSettings>({ ...DEFAULT_PLUGIN_SETTINGS })
+const translationCredentials = ref<TranslationCredentials>({ ...DEFAULT_TRANSLATION_CREDENTIALS })
 const workflowResult = ref<WorkflowResultState>(createEmptyWorkflowResultState())
 const prefersDark = ref(false)
 const previewWarningMessage = ref('')
@@ -336,12 +341,26 @@ function savePluginSettings(partial: Partial<PluginSettings>) {
   pluginSettings.value = normalizePluginSettings(nextSettings)
 }
 
+// 百度凭证独立于普通插件设置，优先走同步数据库桥接，浏览器预览时退回内存态。
+function saveTranslationCredentials(partial: Partial<TranslationCredentials>) {
+  const services = getServices()
+  const nextCredentials = services?.saveTranslationCredentials?.(partial) ?? {
+    ...translationCredentials.value,
+    ...partial,
+  }
+
+  translationCredentials.value = normalizeTranslationCredentials(nextCredentials)
+}
+
 // 打开插件或收到 DB 拉新时，都复用同一套持久化设置回填逻辑。
 function readPersistedState() {
   const services = getServices()
 
   uiSettings.value = normalizeUiSettings(services?.getUiSettings?.() ?? uiSettings.value)
   pluginSettings.value = normalizePluginSettings(services?.getPluginSettings?.() ?? pluginSettings.value)
+  translationCredentials.value = normalizeTranslationCredentials(
+    services?.getTranslationCredentials?.() ?? translationCredentials.value,
+  )
   syncUiPresentation()
 }
 
@@ -458,11 +477,13 @@ onBeforeUnmount(() => {
   <SettingsView
     v-else-if="currentView === 'settings'"
     :plugin-settings="pluginSettings"
+    :translation-credentials="translationCredentials"
     :ui-settings="uiSettings"
     :theme-status="themeStatus"
     @back="goRecords"
     @pick-save-directory="pickSaveDirectory"
     @save-plugin-settings="savePluginSettings"
+    @save-translation-credentials="saveTranslationCredentials"
     @save-ui-settings="saveUiSettings"
   />
 
