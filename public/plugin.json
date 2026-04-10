@@ -10,12 +10,19 @@
   },
   "features": [
     {
-      "code": "screen-shot-translation",
-      "explain": "截屏、翻译与钉住流程骨架，暂未接入真实能力",
-      "cmds": [
-        "截屏&翻译",
-        "截屏&翻译&钉住"
-      ]
+      "code": "screen-shot-translation-run",
+      "explain": "截屏、翻译并把翻译结果钉住到原位置",
+      "cmds": ["截屏翻译钉住"]
+    },
+    {
+      "code": "screen-shot-translation-records",
+      "explain": "查看已保存的钉住记录",
+      "cmds": ["钉住记录"]
+    },
+    {
+      "code": "screen-shot-translation-settings",
+      "explain": "打开截屏翻译设置",
+      "cmds": ["设置"]
     }
   ]
 }

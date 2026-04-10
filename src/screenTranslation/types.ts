@@ -1,5 +1,18 @@
-export type ScreenTranslationView = 'home' | 'settings'
+export type ScreenTranslationFeatureCode =
+  | 'screen-shot-translation-run'
+  | 'screen-shot-translation-records'
+  | 'screen-shot-translation-settings'
+
+export type ScreenTranslationView = 'records' | 'settings' | 'result'
 export type ScreenTranslationStep = 'capture' | 'translate' | 'pin'
+export type TranslationMode = 'auto' | 'en-to-zh' | 'zh-to-en'
+export type WorkflowFailureCode =
+  | 'capture-cancelled'
+  | 'translation-failed'
+  | 'save-config-invalid'
+  | 'save-failed'
+  | 'pin-failed'
+  | 'repin-failed'
 export type ThemeMode = 'system' | 'dark' | 'light'
 export type PinPreviewMode = 'overlay' | 'side-by-side'
 
