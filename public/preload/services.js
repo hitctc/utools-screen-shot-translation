@@ -6,6 +6,7 @@ const {
 const UI_SETTINGS_KEY = 'screen-shot-translation-ui-settings'
 const PLUGIN_SETTINGS_KEY = 'screen-shot-translation-settings'
 const LEGACY_BOOKMARK_SETTINGS_KEY = 'quick-bookmarks-settings'
+const LEGACY_BOOKMARK_UI_SETTINGS_KEY = 'quick-bookmarks-ui-settings'
 const LEGACY_UI_SETTINGS_FALLBACK = {
   showRecentOpened: true,
   showOpenCount: true,
@@ -82,19 +83,49 @@ function clearBookmarkCache() {
   return null
 }
 
-// 过渡兼容层：旧 App 还在读取旧 UI 设置名，这里把新模型映射回旧结构。
+// 过渡兼容层：旧 UI 开关沿用旧 key 独立保存，避免中间态里点击后总是回弹成 true。
+function getLegacyBookmarkUiToggles() {
+  const saved = window.utools.dbStorage.getItem(LEGACY_BOOKMARK_UI_SETTINGS_KEY)
+
+  return {
+    showRecentOpened:
+      typeof saved?.showRecentOpened === 'boolean'
+        ? saved.showRecentOpened
+        : LEGACY_UI_SETTINGS_FALLBACK.showRecentOpened,
+    showOpenCount:
+      typeof saved?.showOpenCount === 'boolean'
+        ? saved.showOpenCount
+        : LEGACY_UI_SETTINGS_FALLBACK.showOpenCount,
+  }
+}
+
+// 过渡兼容层：旧 App 还在读取旧 UI 设置名，这里把旧开关和新 UI 模型拼成稳定结构。
 function getBookmarkUiSettings() {
   return {
-    ...LEGACY_UI_SETTINGS_FALLBACK,
+    ...getLegacyBookmarkUiToggles(),
     ...getUiSettings(),
   }
 }
 
-// 过渡兼容层：旧界面仍按旧方法名更新 UI 设置，底层仍统一写入新 UI settings key。
+// 过渡兼容层：旧界面仍按旧方法名更新 UI 设置，旧开关写回旧 key，新模型字段继续走新 key。
 function saveBookmarkUiSettings(partial) {
+  const patch = partial && typeof partial === 'object' ? partial : {}
+  const nextLegacyToggles = {
+    ...getLegacyBookmarkUiToggles(),
+    ...(typeof patch.showRecentOpened === 'boolean'
+      ? { showRecentOpened: patch.showRecentOpened }
+      : {}),
+    ...(typeof patch.showOpenCount === 'boolean'
+      ? { showOpenCount: patch.showOpenCount }
+      : {}),
+  }
+  const nextUiSettings = saveUiSettings(patch)
+
+  window.utools.dbStorage.setItem(LEGACY_BOOKMARK_UI_SETTINGS_KEY, nextLegacyToggles)
+
   return {
-    ...LEGACY_UI_SETTINGS_FALLBACK,
-    ...saveUiSettings(partial),
+    ...nextLegacyToggles,
+    ...nextUiSettings,
   }
 }
 

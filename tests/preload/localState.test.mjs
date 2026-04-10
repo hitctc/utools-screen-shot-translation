@@ -11,6 +11,37 @@ const {
   normalizePluginSettings,
 } = require('../../public/preload/localState.cjs')
 
+function loadServicesWithStorage(initialStorage = {}) {
+  const servicesModulePath = path.resolve('public/preload/services.js')
+  delete require.cache[servicesModulePath]
+
+  const storage = new Map(Object.entries(initialStorage))
+  global.window = {
+    utools: {
+      dbStorage: {
+        getItem(key) {
+          return storage.has(key) ? storage.get(key) : null
+        },
+        setItem(key, value) {
+          storage.set(key, value)
+        },
+      },
+      shellOpenExternal() {},
+    },
+  }
+
+  require('../../public/preload/services.js')
+
+  return {
+    services: global.window.services,
+    storage,
+    cleanup() {
+      delete global.window
+      delete require.cache[servicesModulePath]
+    },
+  }
+}
+
 test('normalizeUiSettings falls back to default theme and window height', () => {
   assert.deepEqual(normalizeUiSettings({}), DEFAULT_UI_SETTINGS)
 })
@@ -73,41 +104,75 @@ test('normalizePluginSettings preserves supported preview mode and fills missing
 })
 
 test('services keeps legacy preload methods during the Task 3 to Task 4 transition', () => {
-  const servicesModulePath = path.resolve('public/preload/services.js')
-  delete require.cache[servicesModulePath]
+  const { services, cleanup } = loadServicesWithStorage()
 
-  global.window = {
-    utools: {
-      dbStorage: {
-        getItem() {
-          return null
-        },
-        setItem() {},
-      },
+  assert.equal(typeof services.getUiSettings, 'function')
+  assert.equal(typeof services.saveUiSettings, 'function')
+  assert.equal(typeof services.getPluginSettings, 'function')
+  assert.equal(typeof services.savePluginSettings, 'function')
+
+  assert.equal(typeof services.getBookmarkSettings, 'function')
+  assert.equal(typeof services.saveBookmarkSettings, 'function')
+  assert.equal(typeof services.resetBookmarkSettings, 'function')
+  assert.equal(typeof services.getBookmarkCache, 'function')
+  assert.equal(typeof services.saveBookmarkCache, 'function')
+  assert.equal(typeof services.clearBookmarkCache, 'function')
+  assert.equal(typeof services.getBookmarkUiSettings, 'function')
+  assert.equal(typeof services.saveBookmarkUiSettings, 'function')
+  assert.equal(typeof services.getPinnedBookmarks, 'function')
+  assert.equal(typeof services.togglePinnedBookmarkState, 'function')
+  assert.equal(typeof services.getRecentOpenedBookmarks, 'function')
+  assert.equal(typeof services.openBookmarkUrl, 'function')
+  assert.equal(typeof services.loadChromeBookmarks, 'function')
+
+  cleanup()
+})
+
+test('legacy saveBookmarkUiSettings reflects the toggled values in its return payload', () => {
+  const { services, cleanup } = loadServicesWithStorage()
+
+  assert.deepEqual(
+    services.saveBookmarkUiSettings({
+      showRecentOpened: false,
+      showOpenCount: false,
+    }),
+    {
+      showRecentOpened: false,
+      showOpenCount: false,
+      themeMode: 'system',
+      windowHeight: 640,
     },
-  }
+  )
 
-  require('../../public/preload/services.js')
+  cleanup()
+})
 
-  assert.equal(typeof global.window.services.getUiSettings, 'function')
-  assert.equal(typeof global.window.services.saveUiSettings, 'function')
-  assert.equal(typeof global.window.services.getPluginSettings, 'function')
-  assert.equal(typeof global.window.services.savePluginSettings, 'function')
+test('loadChromeBookmarks throws a controlled transition error', () => {
+  const { services, cleanup } = loadServicesWithStorage()
 
-  assert.equal(typeof global.window.services.getBookmarkSettings, 'function')
-  assert.equal(typeof global.window.services.saveBookmarkSettings, 'function')
-  assert.equal(typeof global.window.services.resetBookmarkSettings, 'function')
-  assert.equal(typeof global.window.services.getBookmarkCache, 'function')
-  assert.equal(typeof global.window.services.saveBookmarkCache, 'function')
-  assert.equal(typeof global.window.services.clearBookmarkCache, 'function')
-  assert.equal(typeof global.window.services.getBookmarkUiSettings, 'function')
-  assert.equal(typeof global.window.services.saveBookmarkUiSettings, 'function')
-  assert.equal(typeof global.window.services.getPinnedBookmarks, 'function')
-  assert.equal(typeof global.window.services.togglePinnedBookmarkState, 'function')
-  assert.equal(typeof global.window.services.getRecentOpenedBookmarks, 'function')
-  assert.equal(typeof global.window.services.openBookmarkUrl, 'function')
-  assert.equal(typeof global.window.services.loadChromeBookmarks, 'function')
+  assert.throws(
+    () => services.loadChromeBookmarks('/tmp/bookmarks'),
+    /旧书签预加载桥接已停用/,
+  )
 
-  delete global.window
-  delete require.cache[servicesModulePath]
+  cleanup()
+})
+
+test('savePluginSettings normalizes and persists the new plugin settings payload', () => {
+  const { services, storage, cleanup } = loadServicesWithStorage()
+
+  const result = services.savePluginSettings({
+    sourceLanguage: ' en ',
+    targetLanguage: '   ',
+    pinPreviewMode: 'floating',
+  })
+
+  assert.deepEqual(result, {
+    sourceLanguage: 'en',
+    targetLanguage: 'zh-CN',
+    pinPreviewMode: 'overlay',
+  })
+  assert.deepEqual(storage.get('screen-shot-translation-settings'), result)
+
+  cleanup()
 })
