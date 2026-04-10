@@ -18,6 +18,7 @@ import {
   SYSTEM_THEME_QUERY,
   formatThemeStatus,
   resolveThemeMode,
+  syncPrefersDarkState,
 } from './screenTranslation/theme.js'
 
 type ServicesBridge = {
@@ -33,10 +34,11 @@ const processing = ref(false)
 const homeError = ref('')
 const uiSettings = ref<UiSettings>({ ...DEFAULT_UI_SETTINGS })
 const pluginSettings = ref<PluginSettings>({ ...DEFAULT_PLUGIN_SETTINGS })
+const prefersDark = ref(false)
 let systemThemeQuery: MediaQueryList | null = null
 
 const resolvedThemeMode = computed(() =>
-  resolveThemeMode(uiSettings.value.themeMode, Boolean(systemThemeQuery?.matches)),
+  resolveThemeMode(uiSettings.value.themeMode, prefersDark.value),
 )
 const themeStatus = computed(() =>
   formatThemeStatus(uiSettings.value.themeMode, resolvedThemeMode.value),
@@ -144,7 +146,8 @@ function readPersistedState() {
 }
 
 // 系统主题变化时只刷新根节点主题，不额外引入新的响应式状态。
-function handleSystemThemeChange() {
+function handleSystemThemeChange(queryLike: MediaQueryList | MediaQueryListEvent | null = systemThemeQuery) {
+  syncPrefersDarkState(prefersDark, queryLike)
   applyThemeMode()
 }
 
@@ -155,7 +158,7 @@ function attachSystemThemeListener() {
   }
 
   systemThemeQuery = window.matchMedia(SYSTEM_THEME_QUERY)
-  handleSystemThemeChange()
+  handleSystemThemeChange(systemThemeQuery)
 
   if ('addEventListener' in systemThemeQuery) {
     systemThemeQuery.addEventListener('change', handleSystemThemeChange)

@@ -9,6 +9,11 @@ export function resolveThemeMode(themeMode, prefersDark) {
   return prefersDark ? 'dark' : 'light'
 }
 
+// 系统主题监听回调需要把最新 matches 写进响应式 ref，App 里的计算属性才会重新求值。
+export function syncPrefersDarkState(prefersDarkRef, queryLike) {
+  prefersDarkRef.value = Boolean(queryLike && 'matches' in queryLike ? queryLike.matches : false)
+}
+
 // 首页和设置页共用同一份主题文案，避免两个页面出现不一致的标签。
 export function formatThemeStatus(themeMode, resolvedTheme) {
   if (themeMode === 'dark') {
