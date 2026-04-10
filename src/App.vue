@@ -1,754 +1,312 @@
 <script lang="ts" setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import HomeView from './bookmarks/HomeView.vue'
-import SettingsView from './bookmarks/SettingsView.vue'
-import { sortItemsPinnedFirst } from './bookmarks/itemOrder.js'
-import { getKeyboardNavigationResult } from './bookmarks/keyboardNavigation.js'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import HomeView from './screenTranslation/HomeView.vue'
+import SettingsView from './screenTranslation/SettingsView.vue'
 import {
-  getBookmarkSearchMeta,
-  normalizeSearchTokens,
-} from './bookmarks/search.js'
+  DEFAULT_PLUGIN_SETTINGS,
+  DEFAULT_UI_SETTINGS,
+  WINDOW_HEIGHT_MAX,
+  WINDOW_HEIGHT_MIN,
+  type PinPreviewMode,
+  type PluginSettings,
+  type ScreenTranslationStep,
+  type ScreenTranslationView,
+  type ThemeMode,
+  type UiSettings,
+} from './screenTranslation/types'
 import {
+  SYSTEM_THEME_QUERY,
   formatThemeStatus,
   resolveThemeMode,
-  SYSTEM_THEME_QUERY,
-} from './bookmarks/theme.js'
-import type {
-  BookmarkCardEntry,
-  BookmarkCardItem,
-  BookmarkItem,
-  BookmarkRecentRecord,
-  BookmarkSection,
-  BookmarkResolvedTheme,
-  BookmarkUiSettings,
-  BookmarkThemeMode,
-  BookmarkSourceRoot,
-} from './bookmarks/types'
+} from './screenTranslation/theme.js'
 
-type BookmarkLoadResult = {
-  filePath: string
-  total: number
-  items: BookmarkItem[]
+type ServicesBridge = {
+  getUiSettings?: () => UiSettings
+  saveUiSettings?: (partial: Partial<UiSettings>) => UiSettings
+  getPluginSettings?: () => PluginSettings
+  savePluginSettings?: (partial: Partial<PluginSettings>) => PluginSettings
 }
 
-type BookmarkUiSettingsPatch = Partial<BookmarkUiSettings>
-type PinnedBookmarkMap = Record<string, number>
-type RecentOpenedMap = Record<string, BookmarkRecentRecord>
-type BookmarkRefreshState = 'idle' | 'refreshing' | 'failed'
-type BookmarkRefreshOptions = {
-  nextPath?: string
-  targetView?: 'home' | 'settings'
-  blocking?: boolean
-}
-type SyncPersistedStateOptions = {
-  forceRefresh?: boolean
-  skipBookmarkRefresh?: boolean
-}
-const DEFAULT_WINDOW_HEIGHT = 640
-
-const currentView = ref<'home' | 'settings'>('home')
-const bookmarkPath = ref('')
-const items = ref<BookmarkItem[]>([])
-const total = ref(0)
-const loading = ref(false)
-const saving = ref(false)
-const refreshState = ref<BookmarkRefreshState>('idle')
+const currentView = ref<ScreenTranslationView>('home')
+const currentStep = ref<ScreenTranslationStep>('capture')
+const processing = ref(false)
 const homeError = ref('')
-const settingsError = ref('')
-const bootstrapped = ref(false)
-const searchQuery = ref('')
-const highlightedIndex = ref(0)
-const uiSettings = ref<BookmarkUiSettings>({
-  showRecentOpened: true,
-  showOpenCount: true,
-  themeMode: 'system',
-  windowHeight: DEFAULT_WINDOW_HEIGHT,
+const uiSettings = ref<UiSettings>({ ...DEFAULT_UI_SETTINGS })
+const pluginSettings = ref<PluginSettings>({ ...DEFAULT_PLUGIN_SETTINGS })
+let systemThemeQuery: MediaQueryList | null = null
+
+const resolvedThemeMode = computed(() =>
+  resolveThemeMode(uiSettings.value.themeMode, Boolean(systemThemeQuery?.matches)),
+)
+const themeStatus = computed(() =>
+  formatThemeStatus(uiSettings.value.themeMode, resolvedThemeMode.value),
+)
+const captureStateText = computed(() =>
+  currentStep.value === 'capture'
+    ? '等待开始一次新的截屏流程。'
+    : '截屏骨架已推进，后续会在这里替换成真实截图结果。',
+)
+const translationStateText = computed(() => {
+  if (currentStep.value === 'capture') {
+    return '需要先完成截屏，翻译结果占位才会出现。'
+  }
+
+  if (currentStep.value === 'translate') {
+    return '翻译阶段已经激活，下一步会在这里接入 OCR 与翻译服务。'
+  }
+
+  return '翻译结果骨架已准备好，可以继续进入钉住展示。'
 })
-const prefersDark = ref(false)
-const pinnedMap = ref<PinnedBookmarkMap>({})
-const recentOpenedMap = ref<RecentOpenedMap>({})
-const systemThemeQuery = ref<MediaQueryList | null>(null)
-let scheduledRefreshTimer: ReturnType<typeof globalThis.setTimeout> | null = null
+const pinStateText = computed(() =>
+  currentStep.value === 'pin'
+    ? '钉住骨架已准备，但当前版本还不会真的创建钉住窗口。'
+    : '等待翻译阶段完成后，再把结果钉住到屏幕。',
+)
 
-// 统一把底层解析结果整理成首页卡片模型，避免展示层重复拼字段。
-function normalizeBookmarkItem(item: BookmarkItem): BookmarkItem {
-  const fallbackId = `${item?.url || 'bookmark'}-${item?.dateAdded || '0'}`
+// 本地兜底也要和 preload 的窗口边界一致，避免浏览器预览模式表现跑偏。
+function clampWindowHeight(windowHeight: number) {
+  return Math.min(Math.max(windowHeight, WINDOW_HEIGHT_MIN), WINDOW_HEIGHT_MAX)
+}
+
+// 读取到的 UI 设置可能来自浏览器预览或旧存储，这里统一裁成骨架页可接受的形状。
+function normalizeUiSettings(raw: Partial<UiSettings> | null | undefined): UiSettings {
+  const candidate = raw && typeof raw === 'object' ? raw : {}
+  const themeMode = ['system', 'dark', 'light'].includes(String(candidate.themeMode))
+    ? (candidate.themeMode as ThemeMode)
+    : DEFAULT_UI_SETTINGS.themeMode
+  const parsedWindowHeight = Math.floor(Number(candidate.windowHeight))
 
   return {
-    id: String(item?.id ?? fallbackId),
-    title: String(item?.title ?? '').trim(),
-    url: String(item?.url ?? '').trim(),
-    folderPath: Array.isArray(item?.folderPath) ? item.folderPath : [],
-    sourceRoot: ['bookmark_bar', 'other', 'synced'].includes(String(item?.sourceRoot))
-      ? (item.sourceRoot as BookmarkSourceRoot)
-      : 'bookmark_bar',
-    dateAdded: String(item?.dateAdded ?? ''),
+    themeMode,
+    windowHeight:
+      Number.isFinite(parsedWindowHeight) && parsedWindowHeight > 0
+        ? clampWindowHeight(parsedWindowHeight)
+        : DEFAULT_UI_SETTINGS.windowHeight,
   }
 }
 
-// 系统主题状态只要跟浏览器媒体查询同步一次，后续就由监听器保持更新。
-function syncPrefersDarkState(queryList: MediaQueryList | MediaQueryListEvent | null) {
-  if (!queryList) {
-    prefersDark.value = false
-    return
-  }
-
-  prefersDark.value = Boolean('matches' in queryList ? queryList.matches : false)
-}
-
-// 兼容新旧 MediaQueryList API，确保系统主题切换时都能收到变化。
-function attachSystemThemeListener(queryList: MediaQueryList) {
-  if ('addEventListener' in queryList) {
-    queryList.addEventListener('change', syncPrefersDarkState)
-    return
-  }
-
-  queryList.addListener(syncPrefersDarkState)
-}
-
-// 解除监听时也要兼容新旧 API，不然 uTools 里多次进入会堆积回调。
-function detachSystemThemeListener(queryList: MediaQueryList) {
-  if ('removeEventListener' in queryList) {
-    queryList.removeEventListener('change', syncPrefersDarkState)
-    return
-  }
-
-  queryList.removeListener(syncPrefersDarkState)
-}
-
-// 置顶区要把已置顶书签按置顶时间排好，避免每次刷新顺序乱跳。
-function sortPinnedItems(left: BookmarkCardItem, right: BookmarkCardItem) {
-  const leftPinnedAt = Number(pinnedMap.value[left.id] || 0)
-  const rightPinnedAt = Number(pinnedMap.value[right.id] || 0)
-  return leftPinnedAt - rightPinnedAt
-}
-
-// 最近打开区按最后打开时间倒序展示，时间相同再比较打开次数。
-function sortRecentItems(left: BookmarkCardItem, right: BookmarkCardItem) {
-  const leftRecord = recentOpenedMap.value[left.id]
-  const rightRecord = recentOpenedMap.value[right.id]
-  const leftOpenedAt = Number(leftRecord?.openedAt || 0)
-  const rightOpenedAt = Number(rightRecord?.openedAt || 0)
-
-  if (leftOpenedAt !== rightOpenedAt) {
-    return rightOpenedAt - leftOpenedAt
-  }
-
-  return Number(rightRecord?.openCount || 0) - Number(leftRecord?.openCount || 0)
-}
-
-// 区块里的卡片要带上稳定 key，这样键盘高亮命中的是具体卡片位置而不是纯书签 id。
-function buildSectionEntries(sectionKey: string, list: BookmarkCardItem[]): BookmarkCardEntry[] {
-  return list.map((item, index) => ({
-    cardKey: `${sectionKey}:${item.id}:${index}`,
-    item,
-  }))
-}
-
-// 只有读到一份完整可用的书签结果后，才把它应用到首页状态里。
-function applyBookmarkLoadResult(result: BookmarkLoadResult) {
-  bookmarkPath.value = result.filePath
-  items.value = result.items.map(normalizeBookmarkItem)
-  total.value = result.total
-}
-
-// 缓存命中时先恢复上一份成功结果，避免首页再次从整屏 loading 开始。
-function normalizeBookmarkCache(rawCache: unknown): BookmarkLoadResult | null {
-  if (!rawCache || typeof rawCache !== 'object') {
-    return null
-  }
-
-  const candidate = rawCache as Partial<BookmarkLoadResult>
-  if (!Array.isArray(candidate.items)) {
-    return null
-  }
-
-  const normalizedItems = candidate.items.map(normalizeBookmarkItem)
-  const resolvedTotal = Number(candidate.total)
+// 插件设置只保留翻译方向和钉住预览模式，避免旧业务字段再次混入新骨架。
+function normalizePluginSettings(raw: Partial<PluginSettings> | null | undefined): PluginSettings {
+  const candidate = raw && typeof raw === 'object' ? raw : {}
+  const sourceLanguage =
+    typeof candidate.sourceLanguage === 'string' && candidate.sourceLanguage.trim()
+      ? candidate.sourceLanguage.trim()
+      : DEFAULT_PLUGIN_SETTINGS.sourceLanguage
+  const targetLanguage =
+    typeof candidate.targetLanguage === 'string' && candidate.targetLanguage.trim()
+      ? candidate.targetLanguage.trim()
+      : DEFAULT_PLUGIN_SETTINGS.targetLanguage
+  const pinPreviewMode = ['overlay', 'side-by-side'].includes(String(candidate.pinPreviewMode))
+    ? (candidate.pinPreviewMode as PinPreviewMode)
+    : DEFAULT_PLUGIN_SETTINGS.pinPreviewMode
 
   return {
-    filePath: String(candidate.filePath ?? '').trim(),
-    total: Number.isFinite(resolvedTotal) ? resolvedTotal : normalizedItems.length,
-    items: normalizedItems,
+    sourceLanguage,
+    targetLanguage,
+    pinPreviewMode,
   }
 }
 
-// 缓存只负责首屏秒开，读不到或格式不对时直接忽略，别把异常带到展示层。
-function getBookmarkCache() {
-  try {
-    return normalizeBookmarkCache(window.services.getBookmarkCache())
-  } catch {
+// 所有 preload 调用都先走统一入口，这样浏览器预览模式下也能安全降级。
+function getServices() {
+  if (typeof window === 'undefined' || !window.services || typeof window.services !== 'object') {
     return null
   }
+
+  return window.services as ServicesBridge
 }
 
-// 每次读到最新书签都顺手覆盖缓存，保证下一次进入首页还能先看到结果。
-function saveBookmarkCache(result: BookmarkLoadResult) {
-  try {
-    window.services.saveBookmarkCache({
-      filePath: result.filePath,
-      total: result.total,
-      items: result.items.map(normalizeBookmarkItem),
-    })
-  } catch {
-    // 缓存写入失败不影响当前首页展示，这里保持静默。
-  }
+// 主题切换只依赖一份 data-theme，首页和设置页都从同一个根节点变量取色。
+function applyThemeMode() {
+  document.documentElement.dataset.theme = resolvedThemeMode.value
 }
 
-// 如果缓存结构已经不可用，就主动清掉，避免下次继续命中脏数据。
-function clearBookmarkCache() {
-  try {
-    window.services.clearBookmarkCache()
-  } catch {
-    // 清缓存失败不会影响主流程，这里不额外打断首页。
-  }
-}
-
-// 只在真实书签结果变化时才替换页面，避免静默刷新造成无意义重渲染。
-function getBookmarkResultSignature(result: BookmarkLoadResult | null) {
-  if (!result) {
-    return ''
-  }
-
-  return JSON.stringify({
-    filePath: String(result.filePath || '').trim(),
-    total: Number(result.total || 0),
-    items: result.items.map(normalizeBookmarkItem),
-  })
-}
-
-// 先验证路径是否真的可读，再决定要不要把结果写进当前状态或持久化配置。
-function validateChromeBookmarks(nextPath: string) {
-  return window.services.loadChromeBookmarks(nextPath) as BookmarkLoadResult
-}
-
-// 主插件窗口目前只开放高度设置，所以在每次读取或更新设置后同步一次。
+// 主插件窗口当前只有高度配置，切换设置时直接把最新值同步给 uTools。
 function applyPluginWindowHeight(windowHeight: number) {
-  if (!window.utools?.setExpendHeight) {
-    return
-  }
-
-  window.utools.setExpendHeight(windowHeight)
-}
-
-// 顶部输入框只在首页工作，进入设置页后需要还原成普通状态。
-function syncSubInput() {
-  if (!window.utools?.setSubInput || !window.utools?.removeSubInput) {
-    return
-  }
-
-  if (currentView.value !== 'home' || !bootstrapped.value) {
-    window.utools.removeSubInput()
-    return
-  }
-
-  window.utools.setSubInput(
-    ({ text }) => {
-      searchQuery.value = String(text || '')
-      highlightedIndex.value = 0
-    },
-    '搜索书签标题、域名或目录，标题支持全拼和拼音首字母',
-    true,
-  )
-
-  if (window.utools.setSubInputValue) {
-    window.utools.setSubInputValue(searchQuery.value)
+  if (typeof window.utools?.setExpendHeight === 'function') {
+    window.utools.setExpendHeight(windowHeight)
   }
 }
 
-// 键盘导航始终对当前可见卡片生效，回车直接复用同一套打开逻辑。
-function handleWindowKeydown(event: KeyboardEvent) {
-  const entries = visibleEntries.value
-  const result = getKeyboardNavigationResult({
-    key: event.key,
-    currentView: currentView.value,
-    loading: loading.value,
-    hasError: Boolean(homeError.value),
-    highlightedIndex: highlightedIndex.value,
-    entryCount: entries.length,
-    metaKey: event.metaKey,
-    ctrlKey: event.ctrlKey,
-    altKey: event.altKey,
-  })
-
-  if (result.preventDefault) {
-    event.preventDefault()
-  }
-
-  if (result.action === 'move') {
-    highlightedIndex.value = result.nextIndex
-  } else if (result.action === 'open-current') {
-    const current = entries[highlightedIndex.value]
-    if (current) {
-      handleOpenBookmark(current.item)
-    }
-  }
-
-  if (result.subInputBehavior === 'focus') {
-    window.utools?.subInputFocus?.()
-  }
-}
-
-// 首屏阻塞加载和首页静默刷新共用一套读取逻辑，只在无缓存时才真的挡住页面。
-function refreshBookmarks({
-  nextPath = bookmarkPath.value,
-  targetView = currentView.value,
-  blocking = false,
-}: BookmarkRefreshOptions = {}) {
-  const errorRef = targetView === 'settings' ? settingsError : homeError
-
-  if (blocking) {
-    loading.value = true
-    errorRef.value = ''
-  }
-
-  if (targetView === 'home') {
-    refreshState.value = 'refreshing'
-  }
-
-  try {
-    const loaded = validateChromeBookmarks(nextPath)
-    const currentResult = {
-      filePath: bookmarkPath.value,
-      total: total.value,
-      items: items.value,
-    }
-
-    if (getBookmarkResultSignature(currentResult) !== getBookmarkResultSignature(loaded)) {
-      applyBookmarkLoadResult(loaded)
-      saveBookmarkCache(loaded)
-    }
-
-    if (targetView === 'settings') {
-      settingsError.value = ''
-    } else {
-      homeError.value = ''
-    }
-
-    refreshState.value = 'idle'
-    return true
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '读取书签文件失败'
-
-    if (blocking) {
-      errorRef.value = message
-      items.value = []
-      total.value = 0
-      refreshState.value = 'failed'
-      return false
-    }
-
-    if (targetView === 'settings') {
-      settingsError.value = message
-    } else {
-      refreshState.value = 'failed'
-    }
-
-    return false
-  } finally {
-    if (blocking) {
-      loading.value = false
-    }
-  }
-}
-
-// 有缓存时把真实文件刷新延后到下一拍，让缓存结果先完成渲染再后台更新。
-function scheduleBookmarkRefresh(options: BookmarkRefreshOptions = {}) {
-  if (scheduledRefreshTimer) {
-    window.clearTimeout(scheduledRefreshTimer)
-  }
-
-  scheduledRefreshTimer = window.setTimeout(() => {
-    scheduledRefreshTimer = null
-    refreshBookmarks(options)
-  }, 0)
-}
-
-// 把 uTools 里持久化的设置统一同步到当前界面，云端拉新配置时也复用这一套入口。
-function syncPersistedState(
-  targetView: 'home' | 'settings' = currentView.value,
-  options: SyncPersistedStateOptions = {},
-) {
-  const settings = window.services.getBookmarkSettings() as { chromeBookmarksPath: string }
-  const nextUiSettings = window.services.getBookmarkUiSettings() as BookmarkUiSettings
-  const nextPinnedMap = window.services.getPinnedBookmarks() as PinnedBookmarkMap
-  const nextRecentOpenedMap = window.services.getRecentOpenedBookmarks() as RecentOpenedMap
-  const nextBookmarkPath = settings.chromeBookmarksPath
-  const shouldReloadBookmarks =
-    Boolean(options.forceRefresh) || nextBookmarkPath !== bookmarkPath.value || !items.value.length
-
-  uiSettings.value = nextUiSettings
-  pinnedMap.value = nextPinnedMap
-  recentOpenedMap.value = nextRecentOpenedMap
-  applyPluginWindowHeight(nextUiSettings.windowHeight)
-  bookmarkPath.value = nextBookmarkPath
-
-  if (options.skipBookmarkRefresh) {
-    return
-  }
-
-  if (shouldReloadBookmarks) {
-    if (items.value.length) {
-      scheduleBookmarkRefresh({ nextPath: nextBookmarkPath, targetView })
-    } else {
-      refreshBookmarks({ nextPath: nextBookmarkPath, targetView, blocking: true })
-    }
-  }
-}
-
-// 初始化当前生效路径，并在插件真正进入时触发首次读取。
-function initializeApp() {
-  currentView.value = 'home'
-  homeError.value = ''
-  settingsError.value = ''
-  searchQuery.value = ''
-  highlightedIndex.value = 0
-  refreshState.value = 'idle'
-
-  if (!window.utools || !window.services) {
-    homeError.value = '请通过 uTools 接入开发模式打开当前插件'
-    return
-  }
-
-  syncPersistedState('home', { skipBookmarkRefresh: true })
-  const cachedResult = getBookmarkCache()
-
-  if (cachedResult && cachedResult.filePath === bookmarkPath.value) {
-    applyBookmarkLoadResult(cachedResult)
-  } else {
-    if (cachedResult) {
-      clearBookmarkCache()
-    }
-    items.value = []
-    total.value = 0
-  }
-
-  bootstrapped.value = true
-
-  if (items.value.length) {
-    scheduleBookmarkRefresh({ nextPath: bookmarkPath.value, targetView: 'home' })
-  } else {
-    refreshBookmarks({ nextPath: bookmarkPath.value, targetView: 'home', blocking: true })
-  }
-
-  syncSubInput()
-}
-
-// 保存路径后立即重新解析；只有重新解析成功时才返回首页。
-function saveSettings(nextPath: string) {
-  saving.value = true
-  settingsError.value = ''
-
-  try {
-    const loaded = validateChromeBookmarks(nextPath)
-    const settings = window.services.saveBookmarkSettings(loaded.filePath) as { chromeBookmarksPath: string }
-    applyBookmarkLoadResult(loaded)
-    saveBookmarkCache(loaded)
-    refreshState.value = 'idle'
-    bookmarkPath.value = settings.chromeBookmarksPath
-    currentView.value = 'home'
-    syncSubInput()
-  } catch (error) {
-    settingsError.value = error instanceof Error ? error.message : '读取书签文件失败'
-  } finally {
-    saving.value = false
-  }
-}
-
-// 恢复默认路径时只更新表单值，是否正式生效由保存或重新读取决定。
-function resetSettings() {
-  saving.value = true
-  settingsError.value = ''
-
-  try {
-    const settings = window.services.resetBookmarkSettings() as { chromeBookmarksPath: string }
-    bookmarkPath.value = settings.chromeBookmarksPath
-  } finally {
-    saving.value = false
-  }
-}
-
-// 允许用户在设置页用当前输入值手动试读，不强制先保存。
-function reloadFromSettings(nextPath: string) {
-  settingsError.value = ''
-
-  try {
-    applyBookmarkLoadResult(validateChromeBookmarks(nextPath))
-    refreshState.value = 'idle'
-  } catch (error) {
-    settingsError.value = error instanceof Error ? error.message : '读取书签文件失败'
-  }
-}
-
-// 设置页的展示开关即时持久化，首页读取的是同一份本地状态。
-function changeUiSettings(patch: BookmarkUiSettingsPatch) {
-  uiSettings.value = window.services.saveBookmarkUiSettings(patch) as BookmarkUiSettings
+// 每次 UI 设置变化后都统一刷新主题和窗口高度，避免两个副作用各自分叉。
+function syncUiPresentation() {
+  applyThemeMode()
   applyPluginWindowHeight(uiSettings.value.windowHeight)
 }
 
-// 视图切换后把滚动位置归顶，避免设置页从中间位置开始显示。
-async function scrollViewportToTop() {
-  await nextTick()
-  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
-  document.scrollingElement?.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+// 打开插件或收到 DB 拉新时，都复用同一套持久化设置回填逻辑。
+function readPersistedState() {
+  const services = getServices()
+
+  uiSettings.value = normalizeUiSettings(services?.getUiSettings?.() ?? uiSettings.value)
+  pluginSettings.value = normalizePluginSettings(services?.getPluginSettings?.() ?? pluginSettings.value)
+  syncUiPresentation()
 }
 
-// 打开设置页时先切视图，再把页面滚动位置重置到顶部。
-function openSettingsView() {
-  currentView.value = 'settings'
-  void scrollViewportToTop()
+// 系统主题变化时只刷新根节点主题，不额外引入新的响应式状态。
+function handleSystemThemeChange() {
+  applyThemeMode()
 }
 
-// 从设置页返回首页时也走统一切换入口，避免状态和滚动分叉。
-function backToHome() {
-  currentView.value = 'home'
-  syncPersistedState('home', { forceRefresh: true })
+// 系统主题监听只在跟随系统时生效，页面卸载时也要对应释放监听器。
+function attachSystemThemeListener() {
+  if (typeof window.matchMedia !== 'function') {
+    return
+  }
+
+  systemThemeQuery = window.matchMedia(SYSTEM_THEME_QUERY)
+  handleSystemThemeChange()
+
+  if ('addEventListener' in systemThemeQuery) {
+    systemThemeQuery.addEventListener('change', handleSystemThemeChange)
+    return
+  }
+
+  systemThemeQuery.addListener(handleSystemThemeChange)
 }
 
-// 置顶只影响插件内展示顺序，不会改 Chrome 源书签文件。
-function handleTogglePin(item: BookmarkCardItem) {
-  pinnedMap.value = window.services.togglePinnedBookmarkState(item.id) as PinnedBookmarkMap
+// 监听器的解绑方式需要兼容旧版 MediaQueryList API，避免多次进入插件时叠加回调。
+function detachSystemThemeListener() {
+  if (!systemThemeQuery) {
+    return
+  }
+
+  if ('removeEventListener' in systemThemeQuery) {
+    systemThemeQuery.removeEventListener('change', handleSystemThemeChange)
+    return
+  }
+
+  systemThemeQuery.removeListener(handleSystemThemeChange)
 }
 
-// 打开书签时同时更新最近打开和打开次数，首页状态即时跟上。
-function handleOpenBookmark(item: BookmarkCardItem) {
+// 所有骨架动作都先统一切 processing，再执行最小状态迁移，避免按钮重复点击。
+function runProcessingAction(action: () => void) {
   homeError.value = ''
+  processing.value = true
 
   try {
-    recentOpenedMap.value = window.services.openBookmarkUrl(item.id, item.url) as RecentOpenedMap
-  } catch (error) {
-    homeError.value = error instanceof Error ? error.message : '打开书签失败'
+    action()
+  } finally {
+    processing.value = false
   }
 }
 
-// 手动刷新沿用首页同一份状态流，避免额外分叉出第二套书签读取逻辑。
-function refreshHomeBookmarks() {
-  if (loading.value || refreshState.value === 'refreshing') {
-    return
-  }
-
-  refreshBookmarks({
-    nextPath: bookmarkPath.value,
-    targetView: 'home',
-    blocking: !items.value.length,
+// 截屏动作当前只推进到翻译阶段，后续真实截图接入后继续复用这个入口。
+function startCapture() {
+  runProcessingAction(() => {
+    currentStep.value = 'translate'
   })
 }
 
-const themeMode = computed<BookmarkThemeMode>(() => uiSettings.value.themeMode)
-const resolvedTheme = computed<BookmarkResolvedTheme>(() =>
-  resolveThemeMode(themeMode.value, prefersDark.value),
-)
-const themeStatus = computed(() => formatThemeStatus(themeMode.value, resolvedTheme.value))
-const searchTokens = computed(() => normalizeSearchTokens(searchQuery.value))
-const isRefreshing = computed(() => refreshState.value === 'refreshing')
-const hasRefreshError = computed(() => refreshState.value === 'failed')
-
-const mergedItems = computed<BookmarkCardItem[]>(() =>
-  items.value.map(item => {
-    const recentRecord = recentOpenedMap.value[item.id]
-    return {
-      ...item,
-      title: item.title || '未命名书签',
-      isPinned: Boolean(pinnedMap.value[item.id]),
-      openCount: Number(recentRecord?.openCount || 0),
-    }
-  }),
-)
-
-const searchableItems = computed(() => {
-  if (!searchTokens.value.length) {
-    return mergedItems.value
-  }
-
-  return sortItemsPinnedFirst(
-    mergedItems.value.filter(item => getBookmarkSearchMeta(item, searchTokens.value).matches),
-    pinnedMap.value,
-  )
-})
-
-const pinnedItems = computed(() =>
-  mergedItems.value.filter(item => item.isPinned).sort(sortPinnedItems),
-)
-
-const recentItems = computed(() =>
-  mergedItems.value
-    .filter(item => Boolean(recentOpenedMap.value[item.id]))
-    .sort(sortRecentItems),
-)
-
-const regularItems = computed(() =>
-  mergedItems.value.filter(item => !item.isPinned),
-)
-
-const visibleSections = computed<BookmarkSection[]>(() => {
-  const query = searchQuery.value.trim()
-  if (searchTokens.value.length) {
-    return searchableItems.value.length
-      ? [
-          {
-            key: 'search',
-            title: '搜索结果',
-            entries: buildSectionEntries('search', searchableItems.value),
-          },
-        ]
-      : []
-  }
-
-  const sections: BookmarkSection[] = []
-
-  if (pinnedItems.value.length) {
-    sections.push({
-      key: 'pinned',
-      title: '置顶',
-      entries: buildSectionEntries('pinned', pinnedItems.value),
-    })
-  }
-
-  if (uiSettings.value.showRecentOpened && recentItems.value.length) {
-    sections.push({
-      key: 'recent',
-      title: '最近打开',
-      entries: buildSectionEntries('recent', recentItems.value),
-    })
-  }
-
-  if (regularItems.value.length) {
-    sections.push({
-      key: 'all',
-      title: '全部书签',
-      entries: buildSectionEntries('all', regularItems.value),
-    })
-  }
-
-  return sections
-})
-
-const visibleEntries = computed(() => visibleSections.value.flatMap(section => section.entries))
-
-const highlightedCardKey = computed(() => {
-  if (!visibleEntries.value.length) {
-    return ''
-  }
-
-  const safeIndex = Math.min(highlightedIndex.value, visibleEntries.value.length - 1)
-  return visibleEntries.value[safeIndex]?.cardKey || ''
-})
-
-const emptyText = computed(() => {
-  if (searchQuery.value.trim()) {
-    return `没有找到和“${searchQuery.value.trim()}”匹配的书签。`
-  }
-
-  return '当前没有可展示的书签结果。'
-})
-
-watch(
-  resolvedTheme,
-  value => {
-    if (typeof document === 'undefined') {
-      return
-    }
-
-    document.documentElement.dataset.theme = value
-  },
-  { immediate: true },
-)
-
-watch(currentView, () => {
-  syncSubInput()
-})
-
-watch(visibleEntries, entries => {
-  if (!entries.length) {
-    highlightedIndex.value = 0
+// 翻译动作要求用户先完成截屏骨架，否则首页直接提示当前阻塞点。
+function startTranslate() {
+  if (currentStep.value === 'capture') {
+    homeError.value = '请先完成截屏骨架，再进入翻译。'
     return
   }
 
-  highlightedIndex.value = Math.min(highlightedIndex.value, entries.length - 1)
-})
+  runProcessingAction(() => {
+    currentStep.value = 'pin'
+  })
+}
+
+// 钉住动作目前只给出受控提示，明确当前版本还停留在骨架替换阶段。
+function startPin() {
+  if (currentStep.value !== 'pin') {
+    homeError.value = '请先完成翻译骨架，再尝试钉住。'
+    return
+  }
+
+  runProcessingAction(() => {
+    homeError.value = '当前版本还未接入真实钉住能力。'
+  })
+}
+
+// 首页和设置页之间只切视图，不再保留旧书签页面的额外副状态。
+function openSettings() {
+  currentView.value = 'settings'
+}
+
+// 返回首页时保留当前三步流状态，方便继续从骨架的当前位置往后看。
+function goHome() {
+  currentView.value = 'home'
+}
+
+// UI 设置优先写回 preload；没有 bridge 时就用本地兜底结构保证界面还能预览。
+function saveUiSettings(partial: Partial<UiSettings>) {
+  const services = getServices()
+  const nextSettings = services?.saveUiSettings?.(partial) ?? {
+    ...uiSettings.value,
+    ...partial,
+  }
+
+  uiSettings.value = normalizeUiSettings(nextSettings)
+  syncUiPresentation()
+}
+
+// 插件设置只持久化当前页展示的字段，避免未来真实能力接入前再引入额外状态。
+function savePluginSettings(partial: Partial<PluginSettings>) {
+  const services = getServices()
+  const nextSettings = services?.savePluginSettings?.(partial) ?? {
+    ...pluginSettings.value,
+    ...partial,
+  }
+
+  pluginSettings.value = normalizePluginSettings(nextSettings)
+}
 
 onMounted(() => {
-  window.addEventListener('keydown', handleWindowKeydown)
+  attachSystemThemeListener()
+  readPersistedState()
 
-  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-    systemThemeQuery.value = window.matchMedia(SYSTEM_THEME_QUERY)
-    syncPrefersDarkState(systemThemeQuery.value)
-    attachSystemThemeListener(systemThemeQuery.value)
+  if (!getServices()) {
+    homeError.value = '当前处于浏览器预览模式，状态保存和真实能力桥接尚未注入。'
   }
 
-  if (!window.utools?.onPluginEnter) {
-    initializeApp()
-    return
+  if (typeof window.utools?.onPluginEnter === 'function') {
+    window.utools.onPluginEnter(() => {
+      currentView.value = 'home'
+      currentStep.value = 'capture'
+      homeError.value = ''
+      readPersistedState()
+    })
   }
 
-  window.utools.onPluginEnter(() => {
-    initializeApp()
-  })
-
-  // 云端同步把其他设备上的 dbStorage 拉回来后，立即把当前界面状态刷新成最新配置。
-  window.utools.onDbPull?.(() => {
-    if (!window.services) {
-      return
-    }
-
-    if (!bootstrapped.value) {
-      initializeApp()
-      return
-    }
-
-    syncPersistedState(currentView.value)
-  })
+  if (typeof window.utools?.onDbPull === 'function') {
+    window.utools.onDbPull(() => {
+      readPersistedState()
+    })
+  }
 })
 
 onBeforeUnmount(() => {
-  if (scheduledRefreshTimer) {
-    window.clearTimeout(scheduledRefreshTimer)
-    scheduledRefreshTimer = null
-  }
-  window.removeEventListener('keydown', handleWindowKeydown)
-  if (systemThemeQuery.value) {
-    detachSystemThemeListener(systemThemeQuery.value)
-    systemThemeQuery.value = null
-  }
-  window.utools?.removeSubInput?.()
+  detachSystemThemeListener()
 })
 </script>
 
 <template>
   <HomeView
     v-if="currentView === 'home'"
-    :bootstrapped="bootstrapped"
-    :loading="loading"
+    :processing="processing"
+    :current-step="currentStep"
+    :capture-state-text="captureStateText"
+    :translation-state-text="translationStateText"
+    :pin-state-text="pinStateText"
     :error="homeError"
-    :refreshing="isRefreshing"
-    :refresh-failed="hasRefreshError"
-    :sections="visibleSections"
-    :highlighted-card-key="highlightedCardKey"
-    :is-search-mode="Boolean(searchTokens.length)"
-    :search-query="searchQuery"
-    :empty-text="emptyText"
-    :show-open-count="uiSettings.showOpenCount"
     :theme-status="themeStatus"
-    :total="total"
-    @refresh-bookmarks="refreshHomeBookmarks"
-    @open-bookmark="handleOpenBookmark"
-    @toggle-pin="handleTogglePin"
-    @open-settings="openSettingsView"
+    @start-capture="startCapture"
+    @start-translate="startTranslate"
+    @start-pin="startPin"
+    @open-settings="openSettings"
   />
+
   <SettingsView
     v-else
-    :model-value="bookmarkPath"
-    :show-recent-opened="uiSettings.showRecentOpened"
-    :show-open-count="uiSettings.showOpenCount"
-    :theme-mode="themeMode"
-    :window-height="uiSettings.windowHeight"
-    :default-window-height="DEFAULT_WINDOW_HEIGHT"
-    :saving="saving"
-    :error="settingsError"
-    @back="backToHome"
-    @save="saveSettings"
-    @reset="resetSettings"
-    @reload="reloadFromSettings"
-    @change-ui-settings="changeUiSettings"
+    :plugin-settings="pluginSettings"
+    :ui-settings="uiSettings"
+    :theme-status="themeStatus"
+    @back="goHome"
+    @save-plugin-settings="savePluginSettings"
+    @save-ui-settings="saveUiSettings"
   />
 </template>

@@ -4,7 +4,7 @@ import {
   SYSTEM_THEME_QUERY,
   formatThemeStatus,
   resolveThemeMode,
-} from '../../src/bookmarks/theme.js'
+} from '../../src/screenTranslation/theme.js'
 
 test('SYSTEM_THEME_QUERY keeps the media query used for dark mode detection', () => {
   assert.equal(SYSTEM_THEME_QUERY, '(prefers-color-scheme: dark)')
