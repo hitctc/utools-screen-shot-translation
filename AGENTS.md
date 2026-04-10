@@ -26,53 +26,67 @@
 
 - 项目名称：`utools-screen-shot-translation`
 - 目标方向：做成一个在 `uTools` 内完成“截屏 -> 翻译 -> 钉住结果”的工具
-- 当前阶段：工程迁移完成后的空骨架阶段
+- 当前阶段：第一版入口、设置、记录页和失败闭环已接通，真实截图/翻译/钉住仍待后续实现
 - 当前真实能力：
   - 插件身份已经切换为 `uTools Screen Shot Translation`
-  - `public/plugin.json` 已定义单一入口 `screen-shot-translation`
-  - 首页已经替换成三步流骨架：`截屏`、`翻译`、`钉住`
-  - 保留设置页，用于承载翻译方向、保存结果图片、保存目录、删除前二次确认，以及主题模式和窗口高度
+  - `public/plugin.json` 已定义 3 个入口：
+    - `screen-shot-translation-run` -> `截屏翻译钉住`
+    - `screen-shot-translation-records` -> `钉住记录`
+    - `screen-shot-translation-settings` -> `设置`
+  - `钉住记录` 页面已从保存目录总清单读取记录并渲染瀑布流卡片
+  - `设置` 页面已承载翻译方向、保存结果图片、保存目录、删除前二次确认，以及主题模式和窗口高度
+  - `失败结果页` 已承载主流程失败、重钉失败和未知失败码的统一文案与动作
   - 支持 `跟随系统 / 深色 / 浅色` 三态主题
   - 支持在系统主题变化时同步刷新页面主题和状态文案
   - 支持通过 `dbStorage` 持久化 UI 设置和插件设置
   - 支持调整主插件窗口高度，并在重新进入插件时恢复
   - 支持 Vue 挂载前显示静态首屏壳子，避免纯白空屏
   - 插件设置模型已切到 `translationMode / saveTranslatedImage / saveDirectory / confirmBeforeDelete`，`preload` 侧已完成归一化和测试收口
+  - `public/preload/recordStore.cjs` 已接通保存目录总清单的读取、整理和删除
+  - `public/preload/services.js` 已暴露 `pickSaveDirectory / listSavedRecords / deleteSavedRecord / repinSavedRecord / runCaptureTranslationPin`
 - 当前明确限制：
   - 还没有接入真实截屏能力
   - 还没有接入真实 OCR 或翻译服务
   - 还没有实现真正的图片钉住窗口
-  - 设置页当前只是骨架配置，不代表相关能力已落地
-  - 当前只有一个主入口，不存在多窗口或多 feature 结构
+  - `runCaptureTranslationPin` 仍是诚实占位：当前只会返回失败码，不会真正完成截图翻译钉住
+  - `repinSavedRecord` 仍是诚实占位：当前只会返回 `repin-failed`
 - 当前技术栈：`Vue 3 + Vite 6 + @vitejs/plugin-vue + utools-api-types + Node built-in node:test`
 - 当前运行模型：
-  - `uTools` 进入插件后触发 `src/App.vue` 初始化
-  - `public/preload/services.js` 通过 `window.services` 暴露当前插件正式保留的本地设置能力
+  - `uTools` 进入插件后由 `src/App.vue` 按 feature code 切到 `records / settings / result`，或执行 `run` 主流程入口
+  - `public/preload/services.js` 通过 `window.services` 暴露当前正式保留的设置、记录、目录选择和主流程桥接能力
   - `public/preload/localState.cjs` 负责 UI 设置和插件设置的归一化
-  - `src/screenTranslation/*` 负责首页三步流和设置页 UI
+  - `src/screenTranslation/*` 负责记录页、设置页、结果页和对应 view-state 映射
 
-当前仓库虽然已经有完整工程壳，但它还只是“截屏翻译工具”的骨架，不要把 README 里的长期方向误当成已交付功能。
+当前仓库已经不再是“三步流首页骨架”阶段，但也还没有进入真实截图/翻译/钉住闭环阶段。不要把记录页、失败页和目录选择这些现有壳能力误说成真实主流程已完成。
 
 ## 3. 关键目录与职责
 
 - `public/plugin.json`
-  uTools 插件清单文件，定义插件入口、`preload` 路径、开发态地址、默认窗口高度和功能指令匹配规则。当前只保留一个 `screen-shot-translation` 入口。
+  uTools 插件清单文件，定义插件入口、`preload` 路径、开发态地址、默认窗口高度和功能指令匹配规则。当前保留 3 个 feature 入口。
 - `public/preload/package.json`
   固定 `preload` 目录使用 `commonjs`，不要在这里随意切成 ESM。
 - `public/preload/services.js`
-  负责桥接 `utools.dbStorage`，并通过 `window.services` 暴露当前插件正式保留的四个本地设置方法：`getUiSettings`、`saveUiSettings`、`getPluginSettings`、`savePluginSettings`。
+  负责桥接 `utools.dbStorage`、目录选择、记录读取/删除、主流程占位和重钉占位，并通过 `window.services` 暴露前端可消费的接口。
 - `public/preload/localState.cjs`
   负责 UI 设置与插件设置的归一化规则，包括主题模式、窗口高度，以及翻译保存相关的 `translationMode`、`saveTranslatedImage`、`saveDirectory` 和 `confirmBeforeDelete`。
+- `public/preload/recordStore.cjs`
+  负责保存目录根目录下总清单文件 `.screen-translation-records.json` 的读、写、整理和删除。
+- `public/preload/workflow.cjs`
+  负责主流程 `capture -> translate -> pin -> save` 的失败归因和统一返回契约，当前仍通过依赖注入挂占位实现。
 - `src/App.vue`
-  当前插件 UI 总入口，负责首页 / 设置页双视图切换、三步流状态迁移、主题同步和窗口高度应用。
+  当前插件 UI 总入口，负责 `records / settings / result` 三个视图切换、失败结果页映射、记录读取、删除确认、目录选择和重钉失败闭环。
 - `src/screenTranslation/HomeView.vue`
-  首页视图，负责展示 `截屏 / 翻译 / 钉住` 三步流骨架、错误提示和设置入口。
+  当前记录页视图，负责展示瀑布流记录卡片、空态、warning、删除按钮和设置入口。
 - `src/screenTranslation/SettingsView.vue`
-  设置页视图，负责翻译方向、保存结果图片、保存目录、删除前二次确认，以及主题模式和窗口高度的骨架配置展示。
+  设置页视图，负责翻译方向、保存结果图片、保存目录、删除前二次确认，以及主题模式和窗口高度的配置展示。
+- `src/screenTranslation/ResultView.vue`
+  失败结果页视图，负责展示统一失败文案和 `retry / open-settings / close` 动作。
+- `src/screenTranslation/viewState.js`
+  负责失败码文案映射、记录卡片数据映射和本地文件 `file://` URL 归一化。
 - `src/screenTranslation/theme.js`
   负责三态主题解析、系统主题同步和状态文案格式化。
 - `src/screenTranslation/types.ts`
-  负责首页状态、设置项和页面选项的前端类型与常量定义。
+  负责记录页、结果页、设置项和页面选项的前端类型与常量定义。
 - `src/main.js`
   Vue 客户端挂载入口，同时负责在应用接管页面后移除静态首屏壳子。
 - `src/bootShell.js`
@@ -80,13 +94,19 @@
 - `src/main.css`
   当前截屏翻译工具骨架页的基础样式和主题 token。
 - `tests/preload/localState.test.mjs`
-  负责当前 `preload` 正式保留的设置归一化与读写合并语义测试，包括新的插件设置默认值、脏值归一化和局部更新持久化。
+  负责当前 `preload` 正式保留的设置归一化与读写合并语义测试，包括目录选择、重钉占位桥接和局部更新持久化。
+- `tests/preload/recordStore.test.mjs`
+  负责保存目录总清单的读写、清理、删除和路径安全边界测试。
+- `tests/preload/workflow.test.mjs`
+  负责主流程占位编排、失败归因和异常归一化测试。
 - `tests/preload/theme.test.mjs`
   负责主题模式解析、状态文案和系统主题响应式同步测试。
 - `tests/preload/bootShell.test.mjs`
   负责静态启动壳移除逻辑的最小单测。
 - `tests/pluginSettings.test.mjs`
   负责前端侧插件设置归一化和保存目录警告文案的最小契约测试。
+- `tests/viewState.test.mjs`
+  负责未知失败码兜底、记录卡片时间容错和本地文件路径归一化测试。
 - `vite.config.js`
   Vite 构建配置；当前 `base` 固定为 `./`，用于适配 uTools 本地资源加载。
 - `dist/`
@@ -102,8 +122,12 @@
 
 当前已定义的 feature：
 
-- `screen-shot-translation`
-  通过 `截屏&翻译`、`截屏&翻译&钉住` 进入插件，展示当前三步流骨架首页。
+- `screen-shot-translation-run`
+  通过 `截屏翻译钉住` 进入插件，执行主流程入口。当前只会返回受控失败码，还没有真实截图/翻译/钉住成功闭环。
+- `screen-shot-translation-records`
+  通过 `钉住记录` 进入记录页，展示已保存目录中的总清单记录。
+- `screen-shot-translation-settings`
+  通过 `设置` 进入设置页。
 
 当前关键约定：
 
@@ -113,8 +137,8 @@
   - 对应前端视图或业务模块
   - `README.md` 与 `AGENTS.md`
 - 所有需要 Node.js 权限的能力，优先放到 `public/preload/`，再通过 `window.services` 给前端使用；不要把系统能力直接散落到渲染层各处。
-- 当前 UI 不使用 `vue-router`，而是在 `App.vue` 内维护 `home / settings` 双视图。除非需求明显升级，否则不要提前引入完整路由系统。
-- 当前首页只是骨架流程，不要为了“看起来像完成了”去伪造截图结果、翻译结果或钉住行为。
+- 当前 UI 不使用 `vue-router`，而是在 `App.vue` 内维护 `records / settings / result` 视图切换和 `run` 主流程入口。除非需求明显升级，否则不要提前引入完整路由系统。
+- 当前记录页、结果页和设置页已经是正式承载面；但主流程和重钉仍是占位失败闭环，不要为了“看起来像完成了”去伪造截图结果、翻译结果或钉住成功。
 
 ## 5. 运行与验证
 
@@ -141,12 +165,12 @@
 3. 启动前端开发服务：`npm run dev`
 4. 打开 `uTools 开发者工具`，在项目里选择本仓库的 `public/plugin.json`
 5. 点击 `接入开发`
-6. 在 uTools 中通过 `截屏&翻译` 或 `截屏&翻译&钉住` 打开插件
+6. 在 uTools 中通过 `钉住记录`、`设置`、`截屏翻译钉住` 三个指令验证不同入口
 7. 改 `src/` 下的前端代码时，Vite 会热更新，回到插件窗口即可看到界面变化
 8. 需要看控制台、报错、网络请求或 DOM 时，进入插件后打开 `开发者工具`
-9. 确认首页展示的是 `截屏 -> 翻译 -> 钉住` 三步流骨架，而不是旧业务残留
-10. 点击设置按钮，确认可以进入设置页并返回首页
-11. 在设置页切换主题模式，确认首页状态文案和根节点主题同步更新
+9. 确认 `钉住记录` 页面展示瀑布流记录或受控空态，而不是旧的三步流首页
+10. 确认 `设置` 页面可以返回记录页，且保存目录按钮、保存开关、删除确认开关都可操作
+11. 在设置页切换主题模式，确认记录页和结果页状态标签与根节点主题同步更新
 12. 在设置页拖动窗口高度，确认窗口高度立即变化；关闭并重新进入插件后，确认仍保持为上次保存值
 13. 每次进入插件时，确认会先看到静态首屏壳子而不是纯白空屏
 
@@ -176,17 +200,18 @@
 2. 运行 `npm run build`
 3. 运行 `npm run dev`
 4. 在 uTools 开发者工具中接入 `public/plugin.json`
-5. 通过 `截屏&翻译` 或 `截屏&翻译&钉住` 进入插件
+5. 通过 `钉住记录` 进入插件
 6. 确认静态启动壳文案已经是当前插件语义，而不是旧项目残留
-7. 确认首页展示 `1. 截屏 / 2. 翻译 / 3. 钉住` 三步流骨架
-8. 点击“开始截屏”，确认流程推进到翻译阶段
-9. 在翻译阶段点击“开始翻译”，确认流程推进到钉住阶段
-10. 在钉住阶段点击“钉住结果”，确认收到“当前版本还未接入真实钉住能力”的受控提示
-11. 点击设置按钮，确认可以进入设置页并返回首页
-12. 在设置页切换 `跟随系统 / 深色 / 浅色`，确认首页主题和状态标签即时更新
-13. 在系统主题变化时，确认 `跟随系统` 模式下首页与设置页也能同步更新
-14. 在设置页拖动窗口高度滑块，确认窗口高度会立即变化；点击“恢复默认高度”后确认回到默认值；关闭并重新进入插件后仍保持上次保存值
-15. 切换源语言、目标语言和钉住预览模式后，确认设置项状态能够持久化
+7. 确认记录页展示瀑布流卡片；如果当前没有记录，则看到受控空态和设置入口
+8. 点击设置按钮，确认可以进入设置页并返回记录页
+9. 在设置页点击“选择保存目录”，确认系统目录选择器可打开；取消后不应污染当前设置
+10. 切换 `saveTranslatedImage` 和 `confirmBeforeDelete`，确认设置状态可持久化
+11. 在设置页切换 `跟随系统 / 深色 / 浅色`，确认记录页主题和状态标签即时更新
+12. 在系统主题变化时，确认 `跟随系统` 模式下记录页与设置页也能同步更新
+13. 在设置页拖动窗口高度滑块，确认窗口高度会立即变化；点击“恢复默认高度”后确认回到默认值；关闭并重新进入插件后仍保持上次保存值
+14. 如果保存目录下已有记录，点击缩略图或“重新钉住”，确认进入失败结果页并看到 `repin-failed` 失败闭环
+15. 如果保存目录下已有记录，打开/关闭“删除前二次确认”后删除一条记录，确认确认框行为符合设置
+16. 通过 `截屏翻译钉住` 进入插件，确认当前会进入受控失败结果页，而不是假装成功
 
 ## 6. 配置与安全约束
 
@@ -225,24 +250,26 @@
 
 ## 9. 当前阶段快照
 
-截至 `2026-04-10`，仓库状态可按下面理解：
+截至 `2026-04-11`，仓库状态可按下面理解：
 
 - 当前主线已经从参考书签项目迁移成新的截屏翻译插件工程
 - 当前已具备：
-  - 单一 `screen-shot-translation` 插件入口
+  - `截屏翻译钉住 / 钉住记录 / 设置` 三个入口
   - 静态首屏壳子
-  - 首页 / 设置页双视图
-  - `截屏 / 翻译 / 钉住` 三步流骨架
+  - 记录页 / 设置页 / 失败结果页三种承载面
   - `跟随系统 / 深色 / 浅色` 三态主题
   - 主插件窗口高度设置与持久化
   - `translationMode`、`saveTranslatedImage`、`saveDirectory`、`confirmBeforeDelete` 插件设置与持久化
-  - `preload` 设置接口与最小测试覆盖
-  - 前端设置页已切到新的插件设置契约，并能在保存结果图片开启但目录为空时提示警告
+  - 保存目录总清单读取、整理、删除
+  - 记录页瀑布流展示、目录选择、删除确认开关、删除失败 warning
+  - 主流程失败结果页和重钉失败结果页
+  - `preload` 设置接口、记录接口、目录选择接口、主流程占位接口与测试覆盖
 - 当前仍未具备：
   - 真实截屏
   - 真实 OCR
   - 真实翻译
   - 真实钉住窗口
-  - 目录选择、历史记录和删除确认工作流
+  - 主流程成功时无页面直达的最终闭环
+  - 真实重钉
 
-后续协作者如果继续推进功能，默认应从“真实截屏能力怎么收口到 preload”和“翻译 / 钉住链路如何在当前三步流骨架上接入”这两条主线思考，而不是再回退到旧项目结构。
+后续协作者如果继续推进功能，默认应从“真实截屏能力怎么收口到 preload”和“百度图片翻译 / 钉住窗口如何替换当前占位桥接”这两条主线思考，而不是再回退到旧的三步流首页结构。
