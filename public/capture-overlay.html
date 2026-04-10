@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Capture Overlay</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        cursor: crosshair;
+        user-select: none;
+        background: #111;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      #root {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-size: 100% 100%;
+      }
+
+      #shade {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.36);
+      }
+
+      #selection {
+        position: absolute;
+        border: 2px solid rgba(255, 255, 255, 0.92);
+        background: rgba(255, 255, 255, 0.08);
+        box-shadow: 0 0 0 99999px rgba(0, 0, 0, 0.28);
+        display: none;
+      }
+
+      #hint {
+        position: absolute;
+        left: 24px;
+        bottom: 24px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: rgba(15, 15, 15, 0.72);
+        color: #fff;
+        font-size: 13px;
+        letter-spacing: 0.02em;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="shade"></div>
+      <div id="selection"></div>
+      <div id="hint">拖拽选择截图区域，按 Esc 取消</div>
+    </div>
+    <script>
+      const electronModule = typeof require === 'function' ? require('electron') : null
+      const root = document.getElementById('root')
+      const selectionElement = document.getElementById('selection')
+      let captureChannel = ''
+      let displayBounds = { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }
+      let screenshotImage = null
+      let dragging = false
+      let dragStart = null
+
+      function sendToParent(payload) {
+        if (!captureChannel || !window.utools || typeof window.utools.sendToParent !== 'function') {
+          return
+        }
+
+        window.utools.sendToParent(captureChannel, payload)
+      }
+
+      function clampRect(rect) {
+        const x = Math.max(0, Math.min(rect.x, window.innerWidth))
+        const y = Math.max(0, Math.min(rect.y, window.innerHeight))
+        const right = Math.max(0, Math.min(rect.x + rect.width, window.innerWidth))
+        const bottom = Math.max(0, Math.min(rect.y + rect.height, window.innerHeight))
+
+        return {
+          x: Math.min(x, right),
+          y: Math.min(y, bottom),
+          width: Math.abs(right - x),
+          height: Math.abs(bottom - y),
+        }
+      }
+
+      function renderSelection(rect) {
+        const nextRect = clampRect(rect)
+        selectionElement.style.display = nextRect.width > 0 && nextRect.height > 0 ? 'block' : 'none'
+        selectionElement.style.left = `${nextRect.x}px`
+        selectionElement.style.top = `${nextRect.y}px`
+        selectionElement.style.width = `${nextRect.width}px`
+        selectionElement.style.height = `${nextRect.height}px`
+      }
+
+      async function captureDisplayImage({ displayId, scaleFactor }) {
+        const desktopCapturer = electronModule && electronModule.desktopCapturer
+        if (!desktopCapturer || typeof desktopCapturer.getSources !== 'function') {
+          throw new Error('desktopCapturer-unavailable')
+        }
+
+        const thumbnailWidth = Math.max(1, Math.round(displayBounds.width * scaleFactor))
+        const thumbnailHeight = Math.max(1, Math.round(displayBounds.height * scaleFactor))
+        const sources = await desktopCapturer.getSources({
+          types: ['screen'],
+          thumbnailSize: {
+            width: thumbnailWidth,
+            height: thumbnailHeight,
+          },
+        })
+        const matchedSource =
+          sources.find((source) => String(source.display_id || source.displayId || '') === String(displayId)) ||
+          sources[0]
+
+        if (!matchedSource || !matchedSource.thumbnail) {
+          throw new Error('display-source-missing')
+        }
+
+        const dataUrl =
+          typeof matchedSource.thumbnail.toDataURL === 'function'
+            ? matchedSource.thumbnail.toDataURL()
+            : `data:image/png;base64,${Buffer.from(matchedSource.thumbnail.toPNG()).toString('base64')}`
+
+        const image = new Image()
+        image.src = dataUrl
+        await image.decode()
+        root.style.backgroundImage = `url("${dataUrl}")`
+        screenshotImage = image
+      }
+
+      function buildSelectionRect(event) {
+        return clampRect({
+          x: Math.min(dragStart.x, event.clientX),
+          y: Math.min(dragStart.y, event.clientY),
+          width: Math.abs(event.clientX - dragStart.x),
+          height: Math.abs(event.clientY - dragStart.y),
+        })
+      }
+
+      function submitSelection(rect) {
+        if (!screenshotImage || !rect || rect.width < 4 || rect.height < 4) {
+          return
+        }
+
+        const scaleX = screenshotImage.naturalWidth / window.innerWidth
+        const scaleY = screenshotImage.naturalHeight / window.innerHeight
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.max(1, Math.round(rect.width * scaleX))
+        canvas.height = Math.max(1, Math.round(rect.height * scaleY))
+        const context = canvas.getContext('2d')
+
+        if (!context) {
+          sendToParent({ type: 'cancel' })
+          return
+        }
+
+        context.drawImage(
+          screenshotImage,
+          Math.round(rect.x * scaleX),
+          Math.round(rect.y * scaleY),
+          Math.round(rect.width * scaleX),
+          Math.round(rect.height * scaleY),
+          0,
+          0,
+          canvas.width,
+          canvas.height,
+        )
+
+        sendToParent({
+          type: 'submit',
+          image: canvas.toDataURL('image/png'),
+          bounds: {
+            x: displayBounds.x + rect.x,
+            y: displayBounds.y + rect.y,
+            width: rect.width,
+            height: rect.height,
+          },
+        })
+      }
+
+      root.addEventListener('mousedown', (event) => {
+        if (event.button !== 0 || !screenshotImage) {
+          return
+        }
+
+        dragging = true
+        dragStart = { x: event.clientX, y: event.clientY }
+        renderSelection({ x: event.clientX, y: event.clientY, width: 0, height: 0 })
+      })
+
+      window.addEventListener('mousemove', (event) => {
+        if (!dragging || !dragStart) {
+          return
+        }
+
+        renderSelection(buildSelectionRect(event))
+      })
+
+      window.addEventListener('mouseup', (event) => {
+        if (!dragging || !dragStart) {
+          return
+        }
+
+        dragging = false
+        const rect = buildSelectionRect(event)
+        dragStart = null
+        submitSelection(rect)
+      })
+
+      window.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          sendToParent({ type: 'cancel' })
+        }
+      })
+
+      window.__SCREEN_TRANSLATION_CAPTURE_INIT__ = async function initCaptureOverlay(payload) {
+        captureChannel = payload && typeof payload.channel === 'string' ? payload.channel : ''
+        displayBounds = payload && payload.displayBounds ? payload.displayBounds : displayBounds
+
+        try {
+          await captureDisplayImage({
+            displayId: payload && payload.displayId,
+            scaleFactor: payload && payload.scaleFactor ? payload.scaleFactor : 1,
+          })
+        } catch {
+          sendToParent({ type: 'cancel' })
+        }
+      }
+    </script>
+  </body>
+</html>

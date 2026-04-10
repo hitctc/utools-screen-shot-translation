@@ -216,6 +216,8 @@ test('runMainWorkflow skips saveImage when saving is disabled', async () => {
 })
 
 test('runMainWorkflow returns success with pin bounds when every step succeeds', async () => {
+  const calls = []
+
   const result = await runMainWorkflow({
     ...createWorkflowDeps({
       settings: {
@@ -224,19 +226,27 @@ test('runMainWorkflow returns success with pin bounds when every step succeeds',
         saveDirectory: '/tmp/translated',
         confirmBeforeDelete: true,
       },
-      captureImage: async () => ({ ok: true, imagePath: '/tmp/capture.png' }),
+      captureImage: async () => ({
+        ok: true,
+        imagePath: '/tmp/capture.png',
+        bounds: { x: 8, y: 12, width: 32, height: 32 },
+      }),
       translateImage: async () => ({ ok: true, text: 'translated text', provider: 'stub' }),
-      pinImage: async () => ({
+      pinImage: async (translationResult, captureResult) => {
+        calls.push({ step: 'pin', translationResult, captureResult })
+        return {
         ok: true,
         bounds: { left: 8, top: 12, right: 40, bottom: 44 },
         windowId: 'pin-1',
-      }),
-      saveImage: async (translationResult, bounds) => ({
-        ok: true,
-        recordId: 'record-1',
-        translationResult,
-        bounds,
-      }),
+        }
+      },
+      saveImage: async (translationResult, pinResult) => {
+        calls.push({ step: 'save', translationResult, pinResult })
+        return {
+          ok: true,
+          recordId: 'record-1',
+        }
+      },
     }),
   })
 
@@ -244,4 +254,24 @@ test('runMainWorkflow returns success with pin bounds when every step succeeds',
     ok: true,
     code: 'success',
   })
+  assert.deepEqual(calls, [
+    {
+      step: 'pin',
+      translationResult: { ok: true, text: 'translated text', provider: 'stub' },
+      captureResult: {
+        ok: true,
+        imagePath: '/tmp/capture.png',
+        bounds: { x: 8, y: 12, width: 32, height: 32 },
+      },
+    },
+    {
+      step: 'save',
+      translationResult: { ok: true, text: 'translated text', provider: 'stub' },
+      pinResult: {
+        ok: true,
+        bounds: { left: 8, top: 12, right: 40, bottom: 44 },
+        windowId: 'pin-1',
+      },
+    },
+  ])
 })

@@ -3,40 +3,30 @@ const {
   normalizePluginSettings,
   mergePluginSettings,
 } = require('./localState.cjs')
-const { listSavedRecords, deleteSavedRecord } = require('./recordStore.cjs')
+const {
+  listSavedRecords,
+  deleteSavedRecord,
+  getSavedRecord,
+  saveTranslatedRecord,
+  updateSavedRecordPinState,
+} = require('./recordStore.cjs')
 const { runMainWorkflow } = require('./workflow.cjs')
 const { translateCapturedImage } = require('./baiduPictureTranslate.cjs')
 const {
   getTranslationCredentials,
   saveTranslationCredentials,
 } = require('./translationCredentialStore.cjs')
+const { captureImageWithCustomOverlay } = require('./customCapture.cjs')
+const {
+  pinTranslatedImage,
+  attachPinnedRecord,
+  repinSavedRecordImage,
+} = require('./pinWindowManager.cjs')
 const fs = require('fs')
 const path = require('path')
 
 const UI_SETTINGS_KEY = 'screen-shot-translation-ui-settings'
 const PLUGIN_SETTINGS_KEY = 'screen-shot-translation-settings'
-
-// 截图桥接只负责把 uTools 回调风格能力收口成稳定 Promise，方便主流程统一编排。
-function captureImageWithUtools(utools) {
-  return new Promise((resolve) => {
-    if (!utools || typeof utools.screenCapture !== 'function') {
-      resolve({ ok: false, code: 'capture-cancelled' })
-      return
-    }
-
-    utools.screenCapture((image) => {
-      if (typeof image === 'string' && image.trim()) {
-        resolve({
-          ok: true,
-          image,
-        })
-        return
-      }
-
-      resolve({ ok: false, code: 'capture-cancelled' })
-    })
-  })
-}
 
 // 渲染层每次读取 UI 设置时都先走归一化，保证主题和窗口高度字段始终完整。
 function getUiSettings() {
@@ -77,22 +67,90 @@ function writeTranslationCredentials(partial) {
   return saveTranslationCredentials(window.utools?.db, partial)
 }
 
-// 主流程先接上真实截图能力，后续翻译 / 钉住 / 保存仍继续走受控占位。
+function toFileUrl(filePath) {
+  if (!filePath || typeof filePath !== 'string') {
+    return ''
+  }
+
+  if (filePath.startsWith('file://')) {
+    return filePath
+  }
+
+  if (/^[A-Za-z]:[\\/]/.test(filePath)) {
+    return `file:///${encodeURI(filePath.replace(/\\/g, '/'))}`
+  }
+
+  if (filePath.startsWith('/')) {
+    return `file://${encodeURI(filePath)}`
+  }
+
+  return filePath
+}
+
+function createPersistPinnedRecordBounds(settings) {
+  return (recordId, bounds) =>
+    updateSavedRecordPinState({
+      fs,
+      path,
+      settings,
+      recordId,
+      bounds,
+    })
+}
+
+// 主流程现在接的是自定义截图、真实翻译、真实钉住和可选保存，不再依赖模板占位。
 function runCaptureTranslationPin() {
   const settings = getPluginSettings()
   const credentials = readTranslationCredentials()
+  const persistRecordPinState = createPersistPinnedRecordBounds(settings)
 
   return runMainWorkflow({
     settings,
-    captureImage: async () => captureImageWithUtools(window.utools),
+    captureImage: async () =>
+      captureImageWithCustomOverlay({
+        utools: window.utools,
+      }),
     translateImage: async (captureResult) =>
       translateCapturedImage({
         captureResult,
         settings,
         credentials,
       }),
-    pinImage: async () => ({ ok: false, code: 'pin-failed' }),
-    saveImage: async () => ({ ok: false, code: 'save-failed' }),
+    pinImage: async (translationResult, captureResult) =>
+      pinTranslatedImage({
+        utools: window.utools,
+        imageSrc: translationResult?.translatedImageDataUrl,
+        bounds: captureResult?.bounds,
+        persistRecordPinState,
+      }),
+    saveImage: async (translationResult, pinResult) => {
+      const savedRecordResult = await saveTranslatedRecord({
+        fs,
+        path,
+        settings,
+        translationResult,
+        bounds: pinResult?.bounds,
+      })
+
+      if (!savedRecordResult?.record?.id) {
+        return { ok: false, code: 'save-failed' }
+      }
+
+      const attachResult = await attachPinnedRecord({
+        windowId: pinResult?.windowId,
+        recordId: savedRecordResult.record.id,
+        persistRecordPinState,
+      })
+
+      if (!attachResult?.ok) {
+        return { ok: false, code: 'save-failed' }
+      }
+
+      return {
+        ok: true,
+        recordId: savedRecordResult.record.id,
+      }
+    },
   })
 }
 
@@ -127,10 +185,28 @@ window.services = {
   },
   listSavedRecords: () => listSavedRecords({ fs, path, settings: getPluginSettings() }),
   deleteSavedRecord: (recordId) => deleteSavedRecord({ fs, path, settings: getPluginSettings(), recordId }),
-  // 当前版本没有真实重钉能力时，桥接层只返回一个诚实失败给前端闭环。
   repinSavedRecord: async (recordId) => {
-    void recordId
-    return { ok: false, code: 'repin-failed' }
+    const settings = getPluginSettings()
+    const persistRecordPinState = createPersistPinnedRecordBounds(settings)
+    const record = await getSavedRecord({
+      fs,
+      path,
+      settings,
+      recordId,
+    })
+
+    if (!record) {
+      return { ok: false, code: 'repin-failed' }
+    }
+
+    const absoluteImagePath = path.resolve(settings.saveDirectory, record.imageFilename)
+
+    return repinSavedRecordImage({
+      utools: window.utools,
+      record,
+      imageSrc: toFileUrl(absoluteImagePath),
+      persistRecordPinState,
+    })
   },
   runCaptureTranslationPin,
 }

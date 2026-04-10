@@ -13,6 +13,9 @@ const {
   writeRecordManifest,
   listSavedRecords,
   deleteSavedRecord,
+  getSavedRecord,
+  saveTranslatedRecord,
+  updateSavedRecordPinState,
 } = require('../../public/preload/recordStore.cjs')
 
 function createFsMock({
@@ -51,7 +54,9 @@ function createFsMock({
       },
       promises: {
         async readFile(filePath, encoding) {
-          assert.equal(encoding, 'utf8')
+          if (encoding) {
+            assert.equal(encoding, 'utf8')
+          }
           if (!manifestByPath.has(filePath)) {
             throw new Error(`unexpected readFile: ${filePath}`)
           }
@@ -59,7 +64,9 @@ function createFsMock({
           return manifestByPath.get(filePath)
         },
         async writeFile(filePath, contents, encoding) {
-          assert.equal(encoding, 'utf8')
+          if (typeof contents === 'string') {
+            assert.equal(encoding, 'utf8')
+          }
           writes.push({ filePath, contents })
           manifestByPath.set(filePath, contents)
         },
@@ -259,6 +266,125 @@ test('deleteSavedRecord rejects traversal paths outside the save directory', asy
   assert.deepEqual(result.records, [])
   assert.equal(unlinks.length, 0)
   assert.equal(writes.length, 1)
+})
+
+test('getSavedRecord returns the reconciled record by id', async () => {
+  const manifestPath = path.join('/tmp/save', getManifestFilename())
+  const { fs } = createFsMock({
+    manifestByPath: new Map([
+      [
+        manifestPath,
+        JSON.stringify({
+          version: 1,
+          updatedAt: '2026-04-10T12:00:00.000Z',
+          records: [
+            {
+              id: 'record-1',
+              imageFilename: 'translated.png',
+              createdAt: '2026-04-10T10:00:00.000Z',
+              lastPinnedAt: '2026-04-10T10:10:00.000Z',
+              lastPinBounds: { x: 10, y: 20, width: 120, height: 80 },
+            },
+          ],
+        }),
+      ],
+    ]),
+    directoryPaths: new Set(['/tmp/save']),
+    existingPaths: new Set(['/tmp/save', '/tmp/save/translated.png']),
+  })
+
+  const result = await getSavedRecord({
+    fs,
+    path,
+    settings: { saveDirectory: '/tmp/save' },
+    recordId: 'record-1',
+  })
+
+  assert.deepEqual(result, {
+    id: 'record-1',
+    imageFilename: 'translated.png',
+    createdAt: '2026-04-10T10:00:00.000Z',
+    lastPinnedAt: '2026-04-10T10:10:00.000Z',
+    lastPinBounds: { x: 10, y: 20, width: 120, height: 80 },
+  })
+})
+
+test('saveTranslatedRecord writes the translated image and appends a manifest entry', async () => {
+  const { fs, writes } = createFsMock({
+    directoryPaths: new Set(['/tmp/save']),
+    existingPaths: new Set(['/tmp/save']),
+  })
+
+  const result = await saveTranslatedRecord({
+    fs,
+    path,
+    settings: { saveDirectory: '/tmp/save' },
+    translationResult: {
+      translatedImageBase64: 'aGVsbG8=',
+    },
+    bounds: { x: 16, y: 24, width: 180, height: 96 },
+    createId: () => 'record-1',
+    now: () => new Date('2026-04-11T02:03:04.000Z'),
+  })
+
+  assert.equal(result.record.id, 'record-1')
+  assert.equal(result.record.imageFilename, 'screen-translation-20260411-020304-000-record-1.png')
+  assert.equal(result.record.createdAt, '2026-04-11T02:03:04.000Z')
+  assert.equal(result.record.lastPinnedAt, '2026-04-11T02:03:04.000Z')
+  assert.deepEqual(result.record.lastPinBounds, { x: 16, y: 24, width: 180, height: 96 })
+  assert.equal(writes.length, 2)
+  assert.equal(writes[0].filePath, '/tmp/save/screen-translation-20260411-020304-000-record-1.png')
+  assert.equal(Buffer.from(writes[0].contents).equals(Buffer.from('hello')), true)
+  assert.equal(writes[1].filePath, '/tmp/save/.screen-translation-records.json')
+
+  const manifest = JSON.parse(String(writes[1].contents))
+  assert.deepEqual(manifest.records, [result.record])
+})
+
+test('updateSavedRecordPinState rewrites last pin metadata for the target record', async () => {
+  const manifestPath = path.join('/tmp/save', getManifestFilename())
+  const { fs, writes } = createFsMock({
+    manifestByPath: new Map([
+      [
+        manifestPath,
+        JSON.stringify({
+          version: 1,
+          updatedAt: '2026-04-10T12:00:00.000Z',
+          records: [
+            {
+              id: 'record-1',
+              imageFilename: 'translated.png',
+              createdAt: '2026-04-10T10:00:00.000Z',
+              lastPinnedAt: '2026-04-10T10:10:00.000Z',
+              lastPinBounds: { x: 10, y: 20, width: 120, height: 80 },
+            },
+          ],
+        }),
+      ],
+    ]),
+    directoryPaths: new Set(['/tmp/save']),
+    existingPaths: new Set(['/tmp/save', '/tmp/save/translated.png']),
+  })
+
+  const result = await updateSavedRecordPinState({
+    fs,
+    path,
+    settings: { saveDirectory: '/tmp/save' },
+    recordId: 'record-1',
+    bounds: { x: 40, y: 60, width: 140, height: 90 },
+    now: () => new Date('2026-04-11T05:06:07.000Z'),
+  })
+
+  assert.deepEqual(result, {
+    id: 'record-1',
+    imageFilename: 'translated.png',
+    createdAt: '2026-04-10T10:00:00.000Z',
+    lastPinnedAt: '2026-04-11T05:06:07.000Z',
+    lastPinBounds: { x: 40, y: 60, width: 140, height: 90 },
+  })
+  assert.equal(writes.length, 1)
+  const manifest = JSON.parse(String(writes[0].contents))
+  assert.deepEqual(manifest.records, [result])
 })
 
 test('deleteSavedRecord returns a no-op manifest when the save directory is missing', async () => {

@@ -308,6 +308,14 @@ async function runMainWorkflowEntry() {
     }
 
     if (result.ok) {
+      if (typeof window.utools?.hideMainWindow === 'function') {
+        window.utools.hideMainWindow()
+        workflowResult.value = createEmptyWorkflowResultState()
+        resultRetryMode.value = ''
+        resultRetryRecordId.value = ''
+        return
+      }
+
       goRecords()
       return
     }

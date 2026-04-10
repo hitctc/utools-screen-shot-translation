@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pin Window</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        user-select: none;
+      }
+
+      #root {
+        width: 100%;
+        height: 100%;
+        cursor: move;
+      }
+
+      #image {
+        width: 100%;
+        height: 100%;
+        object-fit: fill;
+        display: block;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <img id="image" alt="" draggable="false" />
+    </div>
+    <script>
+      const root = document.getElementById('root')
+      const imageElement = document.getElementById('image')
+      let pinChannel = ''
+      let dragging = false
+
+      function sendToParent(payload) {
+        if (!pinChannel || !window.utools || typeof window.utools.sendToParent !== 'function') {
+          return
+        }
+
+        window.utools.sendToParent(pinChannel, payload)
+      }
+
+      root.addEventListener('mousedown', (event) => {
+        if (event.button !== 0) {
+          return
+        }
+
+        dragging = true
+        sendToParent({
+          type: 'drag-start',
+          screenX: event.screenX,
+          screenY: event.screenY,
+        })
+      })
+
+      window.addEventListener('mousemove', (event) => {
+        if (!dragging) {
+          return
+        }
+
+        sendToParent({
+          type: 'dragging',
+          screenX: event.screenX,
+          screenY: event.screenY,
+        })
+      })
+
+      window.addEventListener('mouseup', (event) => {
+        if (!dragging) {
+          return
+        }
+
+        dragging = false
+        sendToParent({
+          type: 'drag-end',
+          screenX: event.screenX,
+          screenY: event.screenY,
+        })
+      })
+
+      root.addEventListener('dblclick', () => {
+        sendToParent({ type: 'close' })
+      })
+
+      window.__SCREEN_TRANSLATION_PIN_INIT__ = function initPinWindow(payload) {
+        pinChannel = payload && typeof payload.channel === 'string' ? payload.channel : ''
+        imageElement.src = payload && typeof payload.imageSrc === 'string' ? payload.imageSrc : ''
+      }
+    </script>
+  </body>
+</html>

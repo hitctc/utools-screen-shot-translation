@@ -74,7 +74,7 @@ async function runMainWorkflow({
     return translationResult
   }
 
-  const pinResult = await runWorkflowStep(pinImage, WORKFLOW_CODES.pinFailed, translationResult)
+  const pinResult = await runWorkflowStep(pinImage, WORKFLOW_CODES.pinFailed, translationResult, captureResult)
   if (!isOkResult(pinResult)) {
     return pinResult
   }
@@ -84,7 +84,7 @@ async function runMainWorkflow({
       saveImage,
       WORKFLOW_CODES.saveFailed,
       translationResult,
-      pinResult.bounds,
+      pinResult,
     )
     if (!isOkResult(saveResult)) {
       return saveResult

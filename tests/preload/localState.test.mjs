@@ -14,15 +14,52 @@ const {
 function loadServicesWithStorage(initialStorage = {}, options = {}) {
   const servicesModulePath = path.resolve('public/preload/services.js')
   const credentialStoreModulePath = path.resolve('public/preload/translationCredentialStore.cjs')
+  const customCaptureModulePath = path.resolve('public/preload/customCapture.cjs')
+  const pinWindowManagerModulePath = path.resolve('public/preload/pinWindowManager.cjs')
+  const recordStoreModulePath = path.resolve('public/preload/recordStore.cjs')
   delete require.cache[servicesModulePath]
   delete require.cache[credentialStoreModulePath]
+  delete require.cache[customCaptureModulePath]
+  delete require.cache[pinWindowManagerModulePath]
+  delete require.cache[recordStoreModulePath]
+
+  if (options.customCaptureModule) {
+    require.cache[customCaptureModulePath] = {
+      id: customCaptureModulePath,
+      filename: customCaptureModulePath,
+      loaded: true,
+      exports: options.customCaptureModule,
+    }
+  }
+
+  if (options.pinWindowManagerModule) {
+    require.cache[pinWindowManagerModulePath] = {
+      id: pinWindowManagerModulePath,
+      filename: pinWindowManagerModulePath,
+      loaded: true,
+      exports: options.pinWindowManagerModule,
+    }
+  }
+
+  if (options.recordStoreModule) {
+    require.cache[recordStoreModulePath] = {
+      id: recordStoreModulePath,
+      filename: recordStoreModulePath,
+      loaded: true,
+      exports: options.recordStoreModule,
+    }
+  }
 
   const storage = new Map(Object.entries(initialStorage))
   let credentialDoc = options.translationCredentialDoc ?? null
+  const notifications = []
   global.window = {
     utools: {
       showOpenDialog: options.showOpenDialog ?? (async () => []),
-      screenCapture: options.screenCapture ?? ((callback) => callback('')),
+      createBrowserWindow: options.createBrowserWindow ?? (() => null),
+      hideMainWindow: options.hideMainWindow ?? (() => true),
+      showMainWindow: options.showMainWindow ?? (() => true),
+      showNotification: options.showNotification ?? ((message) => notifications.push(message)),
       dbStorage: {
         getItem(key) {
           return storage.has(key) ? storage.get(key) : null
@@ -56,6 +93,7 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
   return {
     services: global.window.services,
     storage,
+    notifications,
     getCredentialDoc() {
       return credentialDoc
     },
@@ -63,6 +101,9 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
       delete global.window
       delete require.cache[servicesModulePath]
       delete require.cache[credentialStoreModulePath]
+      delete require.cache[customCaptureModulePath]
+      delete require.cache[pinWindowManagerModulePath]
+      delete require.cache[recordStoreModulePath]
     },
   }
 }
@@ -184,8 +225,22 @@ test('pickSaveDirectory returns an empty string when the dialog is cancelled', a
   cleanup()
 })
 
-test('repinSavedRecord returns the honest failure contract', async () => {
-  const { services, cleanup } = loadServicesWithStorage()
+test('repinSavedRecord keeps a bridge failure code from the pin manager', async () => {
+  const { services, cleanup } = loadServicesWithStorage(
+    {
+      'screen-shot-translation-settings': {
+        translationMode: 'auto',
+        saveTranslatedImage: true,
+        saveDirectory: '/tmp/save',
+        confirmBeforeDelete: true,
+      },
+    },
+    {
+      pinWindowManagerModule: {
+        repinSavedRecordImage: async () => ({ ok: false, code: 'repin-failed' }),
+      },
+    },
+  )
 
   assert.deepEqual(await services.repinSavedRecord('record-1'), {
     ok: false,
@@ -421,7 +476,44 @@ test('runCaptureTranslationPin returns save-config-invalid when the persisted sa
   cleanup()
 })
 
-test('runCaptureTranslationPin starts the workflow after screenCapture returns an image', async () => {
+test('repinSavedRecord keeps already pinned requests on the happy path and shows a notification', async () => {
+  const { services, notifications, cleanup } = loadServicesWithStorage(
+    {
+      'screen-shot-translation-settings': {
+        translationMode: 'auto',
+        saveTranslatedImage: true,
+        saveDirectory: '/tmp/save',
+        confirmBeforeDelete: true,
+      },
+    },
+    {
+      recordStoreModule: {
+        getSavedRecord: async () => ({
+          id: 'record-1',
+          imageFilename: 'translated.png',
+          lastPinBounds: { x: 10, y: 20, width: 120, height: 90 },
+        }),
+        listSavedRecords: async () => ({ records: [] }),
+        deleteSavedRecord: async () => ({ records: [] }),
+        saveTranslatedRecord: async () => null,
+        updateSavedRecordPinState: async () => null,
+      },
+      pinWindowManagerModule: {
+        repinSavedRecordImage: async () => ({ ok: true, code: 'already-pinned' }),
+      },
+    },
+  )
+
+  assert.deepEqual(await services.repinSavedRecord('record-1'), {
+    ok: true,
+    code: 'already-pinned',
+  })
+  assert.deepEqual(notifications, [])
+
+  cleanup()
+})
+
+test('runCaptureTranslationPin starts the workflow after the custom capture bridge returns an image', async () => {
   const { services, cleanup } = loadServicesWithStorage(
     {
       'screen-shot-translation-settings': {
@@ -432,7 +524,16 @@ test('runCaptureTranslationPin starts the workflow after screenCapture returns a
       },
     },
     {
-      screenCapture: (callback) => callback('data:image/png;base64,abc123'),
+      customCaptureModule: {
+        captureImageWithCustomOverlay: async () => ({
+          ok: true,
+          image: 'data:image/png;base64,abc123',
+          bounds: { x: 12, y: 24, width: 180, height: 96 },
+        }),
+      },
+      pinWindowManagerModule: {
+        pinTranslatedImage: async () => ({ ok: false, code: 'pin-failed' }),
+      },
     },
   )
 
@@ -446,7 +547,7 @@ test('runCaptureTranslationPin starts the workflow after screenCapture returns a
   cleanup()
 })
 
-test('runCaptureTranslationPin keeps capture-cancelled when screenCapture returns an empty image', async () => {
+test('runCaptureTranslationPin keeps capture-cancelled when the custom capture bridge is cancelled', async () => {
   const { services, cleanup } = loadServicesWithStorage(
     {
       'screen-shot-translation-settings': {
@@ -457,7 +558,12 @@ test('runCaptureTranslationPin keeps capture-cancelled when screenCapture return
       },
     },
     {
-      screenCapture: (callback) => callback(''),
+      customCaptureModule: {
+        captureImageWithCustomOverlay: async () => ({
+          ok: false,
+          code: 'capture-cancelled',
+        }),
+      },
     },
   )
 
