@@ -188,3 +188,26 @@ test('savePluginSettings normalizes and persists the new plugin settings payload
 
   cleanup()
 })
+
+test('savePluginSettings keeps persisted fields when only one field is updated', () => {
+  const { services, storage, cleanup } = loadServicesWithStorage({
+    'screen-shot-translation-settings': {
+      sourceLanguage: 'en',
+      targetLanguage: 'ja',
+      pinPreviewMode: 'side-by-side',
+    },
+  })
+
+  const result = services.savePluginSettings({
+    targetLanguage: ' fr ',
+  })
+
+  assert.deepEqual(result, {
+    sourceLanguage: 'en',
+    targetLanguage: 'fr',
+    pinPreviewMode: 'side-by-side',
+  })
+  assert.deepEqual(storage.get('screen-shot-translation-settings'), result)
+
+  cleanup()
+})
