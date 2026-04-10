@@ -3,6 +3,9 @@ const {
   normalizePluginSettings,
   mergePluginSettings,
 } = require('./localState.cjs')
+const { listSavedRecords, deleteSavedRecord } = require('./recordStore.cjs')
+const fs = require('fs')
+const path = require('path')
 
 const UI_SETTINGS_KEY = 'screen-shot-translation-ui-settings'
 const PLUGIN_SETTINGS_KEY = 'screen-shot-translation-settings'
@@ -43,3 +46,15 @@ window.services = {
   getPluginSettings,
   savePluginSettings,
 }
+
+// 记录清单能力走同一个 preload 入口，但不改变现有设置接口的枚举行为。
+Object.defineProperties(window.services, {
+  listSavedRecords: {
+    enumerable: false,
+    value: () => listSavedRecords({ fs, path, settings: getPluginSettings() }),
+  },
+  deleteSavedRecord: {
+    enumerable: false,
+    value: (recordId) => deleteSavedRecord({ fs, path, settings: getPluginSettings(), recordId }),
+  },
+})
