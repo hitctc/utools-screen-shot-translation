@@ -2,320 +2,241 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把当前仓库迁移成一个结构完整的 uTools 截屏翻译插件工程，清除旧书签业务，并落下“截屏 -> 翻译 -> 钉住”的首页骨架和设置页骨架。
+**Goal:** 把当前骨架插件实现成可用的第一版：支持 `截屏翻译钉住` 无页面主流程、`钉住记录` 瀑布流主页、`设置` 直达页，以及保存目录总清单、重钉、删除和失败结果页。
 
-**Architecture:** 以 `utools-my-quick-bookmarks` 的现有工程壳为基础，保留单 `feature`、单 `App.vue` 和单 `preload/services.js` 的组织方式。删除书签读取、搜索、缓存和打开逻辑，用新的 `screenTranslation` 目录、设置状态和骨架页面替换旧业务语义，再用最小测试和构建验证迁移结果。
+**Architecture:** 保持当前单 `App.vue` + `window.services` 的结构不变，把真实能力继续收口在 `public/preload/`。前端只负责入口视图切换、记录渲染和设置编辑；主流程编排、总清单 JSON、文件保存和失败归因全部放在 preload 纯函数模块里，并用 Node `--test` 覆盖。
 
-**Tech Stack:** Vue 3, Vite 6, uTools plugin manifest, CommonJS preload bridge, Node `--test`
+**Tech Stack:** Vue 3, Vite 6, uTools plugin manifest, CommonJS preload bridge, Node `--test`, uTools `dbStorage`
 
 ---
 
-### Task 1: 复制参考工程壳并清理无关产物
+## File Map
 
-**Files:**
-- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/.gitignore`
-- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/index.html`
-- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/jsconfig.json`
-- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/package.json`
-- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/package-lock.json`
-- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/**/*`
-- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/**/*`
-- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/tests/**/*`
-- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/README.md`
-
-- [ ] **Step 1: 从参考仓库复制基础工程文件，不复制运行产物和依赖**
-
-Run:
-
-```bash
-rsync -a \
-  --exclude '.git' \
-  --exclude 'node_modules' \
-  --exclude 'dist' \
-  --exclude '.DS_Store' \
-  /Users/tc-nihao/100-tc/700-code/100-center/utools-my-quick-bookmarks/ \
-  /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/
-```
-
-Expected: 目标仓库出现 `package.json`、`public/`、`src/`、`tests/` 等完整工程结构。
-
-- [ ] **Step 2: 清理参考仓库的协作文档和无关模板残留**
-
-Run:
-
-```bash
-rm -f /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/AGENTS.md
-rm -rf /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/Hello
-rm -rf /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/Read
-rm -rf /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/Write
-```
-
-Expected: 目标仓库只保留当前插件需要的工程文件，不携带参考项目的协作文档和模板页。
-
-- [ ] **Step 3: 检查复制后的根目录结构**
-
-Run:
-
-```bash
-find /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation -maxdepth 2 -type f | sort
-```
-
-Expected: 能看到根目录、`public/`、`src/`、`tests/` 的文件列表，且没有 `dist/` 和 `node_modules/` 被复制进来。
-
-- [ ] **Step 4: 提交结构迁移基础壳**
-
-Run:
-
-```bash
-git -C /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation add .
-git -C /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation commit -m "chore: copy plugin scaffold from reference project"
-```
-
-Expected: 提交成功，后续替换可以基于这个完整工程壳继续推进。
-
-### Task 2: 替换插件身份与文档入口
-
-**Files:**
-- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/README.md`
-- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/package.json`
 - Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/plugin.json`
+  定义 3 个 feature 入口：`截屏翻译钉住`、`钉住记录`、`设置`。
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/preload/localState.cjs`
+  归一化新的插件设置：翻译方向、保存开关、保存目录、删除确认开关。
+- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/preload/recordStore.cjs`
+  负责总清单 JSON 的读取、排序、修复、写入和删除。
+- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/preload/workflow.cjs`
+  负责主流程状态编排，把截屏、翻译、钉住、保存和失败原因收口成单一接口。
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/preload/services.js`
+  通过 `window.services` 暴露设置、记录、主流程、重钉和删除接口。
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/types.ts`
+  定义新的视图类型、结果页状态和插件设置类型。
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/App.vue`
+  按 feature code 进入 `records / settings / result`，主流程入口失败时切到结果页。
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/HomeView.vue`
+  改造成 `钉住记录` 瀑布流主页。
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/SettingsView.vue`
+  改成真实设置项。
+- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/ResultView.vue`
+  展示失败结果页。
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/main.css`
+  增加瀑布流、记录卡片、失败页和设置页样式。
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/README.md`
+  更新当前真实能力说明。
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/AGENTS.md`
+  同步入口结构、设置模型、preload 边界和验证方式。
+- Modify/Create Tests:
+  - `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/tests/preload/localState.test.mjs`
+  - `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/tests/preload/recordStore.test.mjs`
+  - `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/tests/preload/workflow.test.mjs`
 
-- [ ] **Step 1: 先写一个失败检查，确认旧身份仍然存在**
+### Task 1: 切换入口模型和前端视图骨架
+
+**Files:**
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/plugin.json`
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/types.ts`
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/App.vue`
+
+- [ ] **Step 1: 先把 feature 入口写成 3 个明确指令**
+
+Use this `features` shape:
+
+```json
+[
+  {
+    "code": "screen-shot-translation-run",
+    "explain": "截屏、翻译并把翻译结果钉住到原位置",
+    "cmds": ["截屏翻译钉住"]
+  },
+  {
+    "code": "screen-shot-translation-records",
+    "explain": "查看已保存的钉住记录",
+    "cmds": ["钉住记录"]
+  },
+  {
+    "code": "screen-shot-translation-settings",
+    "explain": "打开截屏翻译设置",
+    "cmds": ["设置"]
+  }
+]
+```
+
+- [ ] **Step 2: 在 `types.ts` 里先定义新的视图和结果状态类型**
+
+Add the minimal type layer:
+
+```ts
+export type ScreenTranslationFeatureCode =
+  | 'screen-shot-translation-run'
+  | 'screen-shot-translation-records'
+  | 'screen-shot-translation-settings'
+
+export type ScreenTranslationView = 'records' | 'settings' | 'result'
+
+export type TranslationMode = 'auto' | 'en-to-zh' | 'zh-to-en'
+
+export type WorkflowFailureCode =
+  | 'capture-cancelled'
+  | 'translation-failed'
+  | 'save-config-invalid'
+  | 'save-failed'
+  | 'pin-failed'
+  | 'repin-failed'
+```
+
+- [ ] **Step 3: 在 `App.vue` 里先写最小 feature 分发逻辑**
+
+Add a handler like:
+
+```ts
+function handlePluginEnter({ code }) {
+  if (code === 'screen-shot-translation-settings') {
+    currentView.value = 'settings'
+    return
+  }
+
+  if (code === 'screen-shot-translation-records') {
+    currentView.value = 'records'
+    void refreshRecords()
+    return
+  }
+
+  void runMainWorkflow()
+}
+```
+
+- [ ] **Step 4: 为主流程失败预留统一结果态**
+
+Keep one result state instead of scattered strings:
+
+```ts
+const workflowResult = ref({
+  visible: false,
+  code: '' as WorkflowFailureCode | '',
+  title: '',
+  message: '',
+})
+```
+
+- [ ] **Step 5: 跑构建确认入口切换没有破前端编译**
 
 Run:
 
 ```bash
-rg -n "quick-bookmarks|bookmarks|chrome书签|快捷书签" \
-  /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/README.md \
-  /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/package.json \
-  /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/plugin.json
+npm run build
 ```
 
-Expected: 命中旧插件身份，说明替换目标明确。
+Expected: `vite build` 成功，说明 manifest 和类型改动没有破坏现有编译。
 
-- [ ] **Step 2: 把 README 改成新插件说明**
+- [ ] **Step 6: 提交入口模型切换**
 
-Replace with:
+Run:
 
-```md
-# uTools Screen Shot Translation
-
-一个放在 uTools 里的截屏翻译插件骨架。
-
-当前版本先完成工程迁移和页面骨架：
-
-- 首页展示 `截屏 -> 翻译 -> 钉住` 三步流
-- 保留设置页，用于承载翻译和显示相关配置
-- 暂未接入真实截屏、翻译和钉住能力
-
-后续开发会在这个工程骨架上逐步接入真实能力。
+```bash
+git add public/plugin.json src/screenTranslation/types.ts src/App.vue
+git commit -m "feat: add run records and settings entry points"
 ```
 
-- [ ] **Step 3: 把 `package.json` 改成新插件身份**
+Expected: 提交成功，后续任务可基于新入口继续实现。
+
+### Task 2: 先把设置模型落稳并补测试
+
+**Files:**
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/preload/localState.cjs`
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/preload/services.js`
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/tests/preload/localState.test.mjs`
+
+- [ ] **Step 1: 先写失败测试，覆盖新的插件设置默认值和归一化**
+
+Add tests like:
+
+```js
+test('normalizePluginSettings returns the new screen translation defaults', () => {
+  assert.deepEqual(normalizePluginSettings({}), {
+    translationMode: 'auto',
+    saveTranslatedImage: false,
+    saveDirectory: '',
+    confirmBeforeDelete: true,
+  })
+})
+
+test('normalizePluginSettings sanitizes invalid values', () => {
+  assert.deepEqual(
+    normalizePluginSettings({
+      translationMode: 'ja-to-en',
+      saveTranslatedImage: 'yes',
+      saveDirectory: 42,
+      confirmBeforeDelete: 'no',
+    }),
+    {
+      translationMode: 'auto',
+      saveTranslatedImage: false,
+      saveDirectory: '',
+      confirmBeforeDelete: true,
+    },
+  )
+})
+```
+
+- [ ] **Step 2: 先运行单测，确认新增断言会失败**
+
+Run:
+
+```bash
+npm test
+```
+
+Expected: `localState` 相关测试失败，因为现有设置模型还没有这些字段。
+
+- [ ] **Step 3: 在 `localState.cjs` 里写最小实现**
 
 Use this shape:
 
-```json
-{
-  "name": "utools-screen-shot-translation",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "test": "node --test tests/preload/*.test.mjs"
-  },
-  "dependencies": {
-    "vue": "^3.5.13"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-vue": "^5.2.1",
-    "utools-api-types": "^7.5.1",
-    "vite": "^6.0.11"
-  }
-}
-```
-
-- [ ] **Step 4: 把 `public/plugin.json` 改成新的 uTools 入口**
-
-Use this content:
-
-```json
-{
-  "main": "index.html",
-  "preload": "preload/services.js",
-  "logo": "logo.png",
-  "development": {
-    "main": "http://localhost:5173"
-  },
-  "pluginSetting": {
-    "height": 640
-  },
-  "features": [
-    {
-      "code": "screen-shot-translation",
-      "explain": "截屏、翻译并把翻译后的图片钉住在屏幕上",
-      "cmds": ["截屏&翻译", "截屏&翻译&钉住"]
-    }
-  ]
-}
-```
-
-- [ ] **Step 5: 重新搜索身份字段，确认入口层已切换**
-
-Run:
-
-```bash
-rg -n "quick-bookmarks|chrome书签|快捷书签|bookmarks" \
-  /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/README.md \
-  /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/package.json \
-  /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/plugin.json
-```
-
-Expected: 三个文件里不再命中旧插件身份。
-
-- [ ] **Step 6: 提交插件身份替换**
-
-Run:
-
-```bash
-git -C /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation add README.md package.json public/plugin.json package-lock.json
-git -C /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation commit -m "chore: rename plugin identity to screen shot translation"
-```
-
-Expected: 提交成功，后续代码替换将基于新插件身份继续。
-
-### Task 3: 重写 preload 状态与桥接边界
-
-**Files:**
-- Delete: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/preload/chromeBookmarks.cjs`
-- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/preload/localState.cjs`
-- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/preload/services.js`
-- Test: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/tests/preload/localState.test.mjs`
-
-- [ ] **Step 1: 先写本地状态测试，覆盖新 UI 设置和插件配置归一化**
-
-Use test content like:
-
 ```js
-import test from 'node:test'
-import assert from 'node:assert/strict'
-import {
-  normalizeUiSettings,
-  normalizePluginSettings,
-} from '../../public/preload/localState.cjs'
-
-test('normalizeUiSettings falls back to default theme and window height', () => {
-  assert.deepEqual(normalizeUiSettings({}), {
-    themeMode: 'system',
-    windowHeight: 640,
-  })
-})
-
-test('normalizePluginSettings keeps language and pin defaults stable', () => {
-  assert.deepEqual(normalizePluginSettings({}), {
-    sourceLanguage: 'auto',
-    targetLanguage: 'zh-CN',
-    pinPreviewMode: 'overlay',
-  })
-})
-```
-
-- [ ] **Step 2: 运行新测试，确认它先失败**
-
-Run:
-
-```bash
-cd /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation
-node --test tests/preload/localState.test.mjs
-```
-
-Expected: FAIL，报出 `normalizePluginSettings` 未定义或断言不匹配。
-
-- [ ] **Step 3: 在 `localState.cjs` 中实现最小新状态模型**
-
-Implement around this shape:
-
-```js
-const DEFAULT_UI_SETTINGS = {
-  themeMode: 'system',
-  windowHeight: 640,
-}
-
 const DEFAULT_PLUGIN_SETTINGS = {
-  sourceLanguage: 'auto',
-  targetLanguage: 'zh-CN',
-  pinPreviewMode: 'overlay',
+  translationMode: 'auto',
+  saveTranslatedImage: false,
+  saveDirectory: '',
+  confirmBeforeDelete: true,
 }
 
-function normalizeUiSettings(raw) {
-  const data = raw && typeof raw === 'object' ? raw : {}
-  const themeMode = ['system', 'dark', 'light'].includes(data.themeMode) ? data.themeMode : DEFAULT_UI_SETTINGS.themeMode
-  const windowHeight = Math.floor(Number(data.windowHeight))
-
-  return {
-    themeMode,
-    windowHeight: Number.isFinite(windowHeight) && windowHeight > 0 ? Math.min(Math.max(windowHeight, 480), 960) : DEFAULT_UI_SETTINGS.windowHeight,
-  }
-}
+const VALID_TRANSLATION_MODES = new Set(['auto', 'en-to-zh', 'zh-to-en'])
 
 function normalizePluginSettings(raw) {
   const data = raw && typeof raw === 'object' ? raw : {}
 
   return {
-    sourceLanguage: typeof data.sourceLanguage === 'string' && data.sourceLanguage.trim() ? data.sourceLanguage.trim() : DEFAULT_PLUGIN_SETTINGS.sourceLanguage,
-    targetLanguage: typeof data.targetLanguage === 'string' && data.targetLanguage.trim() ? data.targetLanguage.trim() : DEFAULT_PLUGIN_SETTINGS.targetLanguage,
-    pinPreviewMode: ['overlay', 'side-by-side'].includes(data.pinPreviewMode) ? data.pinPreviewMode : DEFAULT_PLUGIN_SETTINGS.pinPreviewMode,
+    translationMode: VALID_TRANSLATION_MODES.has(data.translationMode)
+      ? data.translationMode
+      : DEFAULT_PLUGIN_SETTINGS.translationMode,
+    saveTranslatedImage: Boolean(data.saveTranslatedImage),
+    saveDirectory: typeof data.saveDirectory === 'string' ? data.saveDirectory.trim() : '',
+    confirmBeforeDelete:
+      typeof data.confirmBeforeDelete === 'boolean'
+        ? data.confirmBeforeDelete
+        : DEFAULT_PLUGIN_SETTINGS.confirmBeforeDelete,
   }
-}
-
-module.exports = {
-  DEFAULT_UI_SETTINGS,
-  DEFAULT_PLUGIN_SETTINGS,
-  normalizeUiSettings,
-  normalizePluginSettings,
 }
 ```
 
-- [ ] **Step 4: 在 `services.js` 中以新插件桥接为主，并在 Task 4 前允许最小兼容层**
+- [ ] **Step 4: 在 `services.js` 中保持现有接口名不变，只升级返回值**
 
-Implement around this shape:
+Keep the bridge stable:
 
 ```js
-const {
-  normalizeUiSettings,
-  normalizePluginSettings,
-} = require('./localState.cjs')
-
-const UI_SETTINGS_KEY = 'screen-shot-translation-ui-settings'
-const PLUGIN_SETTINGS_KEY = 'screen-shot-translation-settings'
-
-function getUiSettings() {
-  return normalizeUiSettings(window.utools.dbStorage.getItem(UI_SETTINGS_KEY))
-}
-
-function saveUiSettings(partial) {
-  const next = normalizeUiSettings({
-    ...getUiSettings(),
-    ...(partial && typeof partial === 'object' ? partial : {}),
-  })
-  window.utools.dbStorage.setItem(UI_SETTINGS_KEY, next)
-  return next
-}
-
-function getPluginSettings() {
-  return normalizePluginSettings(window.utools.dbStorage.getItem(PLUGIN_SETTINGS_KEY))
-}
-
-function savePluginSettings(partial) {
-  const next = normalizePluginSettings({
-    ...getPluginSettings(),
-    ...(partial && typeof partial === 'object' ? partial : {}),
-  })
-  window.utools.dbStorage.setItem(PLUGIN_SETTINGS_KEY, next)
-  return next
-}
-
 window.services = {
   getUiSettings,
   saveUiSettings,
@@ -324,461 +245,627 @@ window.services = {
 }
 ```
 
-Compatibility note:
+The change here is that `getPluginSettings()` / `savePluginSettings()` now return the new fields above.
 
-```text
-如果此时旧的 src/App.vue 还没在 Task 4 替换掉，services.js 可以临时保留薄兼容层，
-只保证旧页面不会因为 preload 方法缺失直接崩溃。兼容层必须满足：
-1. 新 API 仍然是主桥接边界；
-2. 旧方法只做空实现、受控错误或最小结构回填；
-3. 不恢复旧书签业务逻辑；
-4. 在 Task 4 完成后删除。
-```
-
-- [ ] **Step 5: 删除旧书签 preload 文件和无关测试**
+- [ ] **Step 5: 再跑单测，确认设置归一化通过**
 
 Run:
 
 ```bash
-rm -f /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/preload/chromeBookmarks.cjs
-rm -f /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/tests/preload/chromeBookmarks.test.mjs
-rm -f /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/tests/preload/itemOrder.test.mjs
-rm -f /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/tests/preload/keyboardNavigation.test.mjs
-rm -f /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/tests/preload/search.test.mjs
+npm test
 ```
 
-Expected: 书签解析、搜索、排序和导航相关测试不再保留。
+Expected: `tests/preload/localState.test.mjs` 通过，旧字段断言已全部替换为新模型。
 
-- [ ] **Step 6: 重新运行本地状态测试**
+- [ ] **Step 6: 提交设置模型更新**
 
 Run:
 
 ```bash
-cd /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation
-node --test tests/preload/localState.test.mjs
+git add public/preload/localState.cjs public/preload/services.js tests/preload/localState.test.mjs
+git commit -m "feat: add persistent translation and delete settings"
 ```
 
-Expected: PASS。
+Expected: 提交成功，后续记录页和主流程可以依赖统一设置结构。
 
-- [ ] **Step 7: 提交 preload 边界替换**
-
-Run:
-
-```bash
-git -C /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation add public/preload tests/preload
-git -C /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation commit -m "refactor: replace bookmark preload state with plugin settings"
-```
-
-Expected: 提交成功，渲染层后续以新的设置接口为主；如果中间态需要兼容层，允许补碎片提交修正，但提交信息仍需使用“英文类型：中文正文”格式。
-
-### Task 4: 用新页面骨架替换旧书签前端
+### Task 3: 实现保存目录总清单和记录清理逻辑
 
 **Files:**
-- Delete: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/bookmarks/components/BookmarkAvatar.vue`
-- Delete: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/bookmarks/components/BookmarkCard.vue`
-- Delete: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/bookmarks/components/BookmarkCover.vue`
-- Delete: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/bookmarks/components/BookmarksSection.vue`
-- Delete: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/bookmarks/itemOrder.js`
-- Delete: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/bookmarks/keyboardNavigation.js`
-- Delete: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/bookmarks/search.js`
-- Delete: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/bookmarks/theme.js`
-- Delete: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/bookmarks/types.ts`
-- Delete: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/bookmarks/HomeView.vue`
-- Delete: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/bookmarks/SettingsView.vue`
-- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/HomeView.vue`
-- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/SettingsView.vue`
-- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/types.ts`
-- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/App.vue`
-- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/main.css`
+- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/preload/recordStore.cjs`
+- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/tests/preload/recordStore.test.mjs`
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/preload/services.js`
 
-Coupling note:
+- [ ] **Step 1: 先写记录清单测试，锁定 JSON 结构和排序行为**
 
-```text
-如果前端骨架替换会立即影响现有 theme 相关测试或旧主题模块引用，
-Task 4 允许顺手处理“和骨架替换直接耦合的最小测试或兼容层”，
-以保证该任务单独提交后不会产生确定性回归。
-这类处理必须满足：
-1. 只覆盖与骨架替换直接耦合的点；
-2. 不提前做 Task 5 的完整测试清理；
-3. 不恢复旧书签页面逻辑。
+Add tests like:
+
+```js
+test('sortRecordsByCreatedAtDesc keeps newest record first', () => {
+  const sorted = sortRecordsByCreatedAtDesc([
+    { id: 'a', createdAt: '2026-04-10T10:00:00.000Z' },
+    { id: 'b', createdAt: '2026-04-10T12:00:00.000Z' },
+  ])
+
+  assert.deepEqual(sorted.map((item) => item.id), ['b', 'a'])
+})
+
+test('reconcileRecords drops entries whose image file is missing', async () => {
+  const result = await reconcileRecords({
+    records: [{ id: 'a', imageFilename: 'missing.png', createdAt: '2026-04-10T12:00:00.000Z' }],
+    fileExists: async () => false,
+  })
+
+  assert.deepEqual(result.records, [])
+})
 ```
 
-- [ ] **Step 1: 先写一个最小页面骨架测试或 smoke 断言点**
+- [ ] **Step 2: 先实现不依赖 uTools 的纯函数**
 
-Because the repo currently has no Vue unit test harness, define smoke assertions via string search:
+Start with helpers like:
+
+```js
+function getManifestFilename() {
+  return '.screen-translation-records.json'
+}
+
+function sortRecordsByCreatedAtDesc(records) {
+  return [...records].sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+}
+
+async function reconcileRecords({ records, fileExists }) {
+  const validRecords = []
+
+  for (const record of records) {
+    if (await fileExists(record.imageFilename)) {
+      validRecords.push(record)
+    }
+  }
+
+  return { records: sortRecordsByCreatedAtDesc(validRecords) }
+}
+```
+
+- [ ] **Step 3: 再补文件读写接口，保持单文件总清单模型**
+
+Implement the file API:
+
+```js
+async function readRecordManifest({ fs, path, directoryPath }) {
+  const manifestPath = path.join(directoryPath, getManifestFilename())
+
+  if (!fs.existsSync(manifestPath)) {
+    return { version: 1, updatedAt: '', records: [] }
+  }
+
+  return JSON.parse(await fs.promises.readFile(manifestPath, 'utf8'))
+}
+
+async function writeRecordManifest({ fs, path, directoryPath, manifest }) {
+  const manifestPath = path.join(directoryPath, getManifestFilename())
+  const nextManifest = {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    records: sortRecordsByCreatedAtDesc(manifest.records),
+  }
+
+  await fs.promises.writeFile(manifestPath, JSON.stringify(nextManifest, null, 2), 'utf8')
+  return nextManifest
+}
+```
+
+- [ ] **Step 4: 在 `services.js` 中暴露记录读取和删除入口**
+
+Expose methods like:
+
+```js
+window.services = {
+  ...window.services,
+  listSavedRecords: () => listSavedRecords({ fs, path, settings: getPluginSettings() }),
+  deleteSavedRecord: (recordId) => deleteSavedRecord({ fs, path, settings: getPluginSettings(), recordId }),
+}
+```
+
+- [ ] **Step 5: 跑新增测试，确认总清单逻辑稳定**
+
+Run:
 
 ```bash
-rg -n "截屏|翻译|钉住|设置" \
-  /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/App.vue \
-  /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/HomeView.vue \
-  /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/SettingsView.vue
+node --test tests/preload/recordStore.test.mjs
 ```
 
-Expected: 初次运行前会失败，因为新目录和新文案还不存在。
+Expected: 新测试通过，记录清单排序和脏数据清理行为稳定。
 
-- [ ] **Step 2: 新建三步流类型定义**
+- [ ] **Step 6: 提交记录清单模块**
 
-Create `src/screenTranslation/types.ts` with:
+Run:
+
+```bash
+git add public/preload/recordStore.cjs public/preload/services.js tests/preload/recordStore.test.mjs
+git commit -m "feat: add saved record manifest store"
+```
+
+Expected: 提交成功，记录页已经有稳定的数据源。
+
+### Task 4: 实现主流程编排和失败归因
+
+**Files:**
+- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/preload/workflow.cjs`
+- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/tests/preload/workflow.test.mjs`
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/preload/services.js`
+
+- [ ] **Step 1: 先写失败归因测试，锁定成功和失败返回形状**
+
+Add tests like:
+
+```js
+test('runMainWorkflow returns save-config-invalid when saving is enabled without directory', async () => {
+  const result = await runMainWorkflow({
+    settings: { saveTranslatedImage: true, saveDirectory: '' },
+    captureImage: async () => ({ ok: true }),
+  })
+
+  assert.deepEqual(result, {
+    ok: false,
+    code: 'save-config-invalid',
+  })
+})
+
+test('runMainWorkflow returns capture-cancelled when screenshot is cancelled', async () => {
+  const result = await runMainWorkflow({
+    settings: { saveTranslatedImage: false, saveDirectory: '' },
+    captureImage: async () => ({ ok: false, code: 'cancelled' }),
+  })
+
+  assert.equal(result.code, 'capture-cancelled')
+})
+```
+
+- [ ] **Step 2: 先实现纯编排函数，不直接把 uTools 写死到逻辑里**
+
+Use dependency injection:
+
+```js
+async function runMainWorkflow({
+  settings,
+  captureImage,
+  translateImage,
+  pinImage,
+  saveImage,
+}) {
+  if (settings.saveTranslatedImage && !settings.saveDirectory) {
+    return { ok: false, code: 'save-config-invalid' }
+  }
+
+  const captureResult = await captureImage()
+  if (!captureResult.ok) {
+    return { ok: false, code: 'capture-cancelled' }
+  }
+
+  const translationResult = await translateImage(captureResult)
+  if (!translationResult.ok) {
+    return { ok: false, code: 'translation-failed' }
+  }
+
+  const pinResult = await pinImage(translationResult)
+  if (!pinResult.ok) {
+    return { ok: false, code: 'pin-failed' }
+  }
+
+  if (settings.saveTranslatedImage) {
+    const saveResult = await saveImage(translationResult, pinResult.bounds)
+    if (!saveResult.ok) {
+      return { ok: false, code: 'save-failed' }
+    }
+  }
+
+  return { ok: true }
+}
+```
+
+- [ ] **Step 3: 在 `services.js` 中做真实依赖装配**
+
+Add a bridge like:
+
+```js
+window.services.runCaptureTranslationPin = async () => {
+  const settings = getPluginSettings()
+  return runMainWorkflow({
+    settings,
+    captureImage: () => captureWithUtools(window.utools),
+    translateImage: (captureResult) => translateWithBaidu(captureResult),
+    pinImage: (translationResult) => pinTranslatedImage(window.utools, translationResult),
+    saveImage: (translationResult, bounds) =>
+      saveTranslatedRecord({ fs, path, settings, translationResult, bounds }),
+  })
+}
+```
+
+- [ ] **Step 4: 再补重钉入口，让主页复用同一失败码体系**
+
+Use the same result shape:
+
+```js
+window.services.repinSavedRecord = async (recordId) => {
+  return repinSavedRecord({
+    fs,
+    path,
+    settings: getPluginSettings(),
+    recordId,
+    pinImage: (record) => pinSavedImage(window.utools, record),
+  })
+}
+```
+
+- [ ] **Step 5: 跑主流程测试**
+
+Run:
+
+```bash
+node --test tests/preload/workflow.test.mjs
+```
+
+Expected: 成功路径和失败归因测试全部通过。
+
+- [ ] **Step 6: 提交流程编排模块**
+
+Run:
+
+```bash
+git add public/preload/workflow.cjs public/preload/services.js tests/preload/workflow.test.mjs
+git commit -m "feat: add capture translate pin workflow service"
+```
+
+Expected: 提交成功，前端已经可以只依赖一层业务接口。
+
+### Task 5: 重写设置页、记录页和失败结果页
+
+**Files:**
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/App.vue`
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/HomeView.vue`
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/SettingsView.vue`
+- Create: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/ResultView.vue`
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/main.css`
+
+- [ ] **Step 1: 先把 `HomeView.vue` 改成只接收记录页所需 props**
+
+Use a prop contract like:
 
 ```ts
-export type ScreenTranslationView = 'home' | 'settings'
-export type ScreenTranslationStep = 'capture' | 'translate' | 'pin'
-export type ScreenTranslationStepState = 'idle' | 'ready' | 'done'
-
-export type ScreenTranslationUiSettings = {
-  themeMode: 'system' | 'dark' | 'light'
-  windowHeight: number
-}
-
-export type ScreenTranslationPluginSettings = {
-  sourceLanguage: string
-  targetLanguage: string
-  pinPreviewMode: 'overlay' | 'side-by-side'
-}
+const props = defineProps<{
+  records: Array<{
+    id: string
+    imagePath: string
+    createdAtLabel: string
+    orderLabel: string
+  }>
+  loading: boolean
+  emptyStateTitle: string
+  emptyStateCopy: string
+}>()
 ```
 
-- [ ] **Step 3: 新建首页三步流骨架页**
+- [ ] **Step 2: 在 `HomeView.vue` 中先实现瀑布流卡片和删除按钮**
 
-Create `src/screenTranslation/HomeView.vue` around:
+Use a DOM shape like:
 
 ```vue
-<script setup lang="ts">
-import type { ScreenTranslationStep } from './types'
+<section class="records-grid">
+  <article v-for="record in records" :key="record.id" class="record-card">
+    <button class="record-card__preview" @click="$emit('repin-record', record.id)">
+      <img :src="record.imagePath" :alt="record.orderLabel" />
+    </button>
+    <div class="record-card__meta">
+      <span>{{ record.orderLabel }}</span>
+      <span>{{ record.createdAtLabel }}</span>
+    </div>
+    <button class="secondary-button secondary-button--danger" @click="$emit('delete-record', record.id)">
+      删除
+    </button>
+  </article>
+</section>
+```
 
-defineProps<{
-  bootstrapped: boolean
-  processing: boolean
-  currentStep: ScreenTranslationStep
-  captureStateText: string
-  translationStateText: string
-  pinStateText: string
-  error: string
-}>()
+- [ ] **Step 3: 把 `SettingsView.vue` 收缩成真实字段**
 
-const emit = defineEmits<{
-  (event: 'start-capture'): void
-  (event: 'start-translate'): void
-  (event: 'start-pin'): void
-  (event: 'open-settings'): void
-}>()
-</script>
+Render only:
 
+```vue
+<select :value="pluginSettings.translationMode" @change="emitTranslationModeChange(...)">
+  <option value="auto">自动</option>
+  <option value="en-to-zh">英 -> 中</option>
+  <option value="zh-to-en">中 -> 英</option>
+</select>
+
+<input
+  type="checkbox"
+  :checked="pluginSettings.saveTranslatedImage"
+  @change="emitSaveTranslatedImageChange(...)"
+>
+
+<input
+  type="checkbox"
+  :checked="pluginSettings.confirmBeforeDelete"
+  @change="emitConfirmBeforeDeleteChange(...)"
+>
+```
+
+- [ ] **Step 4: 新建 `ResultView.vue`，统一展示失败结果**
+
+Start with:
+
+```vue
 <template>
-  <section class="page-shell page-shell--home">
-    <header class="hero-card">
-      <p class="section-label">Screen Translation</p>
-      <h1>截屏 -> 翻译 -> 钉住</h1>
-      <p class="hero-copy">当前版本先完成流程骨架，后续再接入真实能力。</p>
-    </header>
-
-    <p v-if="error" class="state-card state-error">{{ error }}</p>
-
-    <section class="step-card">
-      <h2>1. 截屏</h2>
-      <p>{{ captureStateText }}</p>
-      <button class="primary-button" :disabled="processing" @click="emit('start-capture')">开始截屏</button>
-    </section>
-
-    <section class="step-card">
-      <h2>2. 翻译</h2>
-      <p>{{ translationStateText }}</p>
-      <button class="primary-button" :disabled="processing" @click="emit('start-translate')">开始翻译</button>
-    </section>
-
-    <section class="step-card">
-      <h2>3. 钉住</h2>
-      <p>{{ pinStateText }}</p>
-      <button class="primary-button" :disabled="processing" @click="emit('start-pin')">钉住结果</button>
-    </section>
-
-    <div class="home-dock__actions">
-      <button class="secondary-button" @click="emit('open-settings')">设置</button>
+  <section class="page-shell page-shell--result">
+    <p class="section-label">Workflow Result</p>
+    <h1>{{ title }}</h1>
+    <p>{{ message }}</p>
+    <div class="actions-row">
+      <button type="button" class="primary-button" v-if="showRetry" @click="$emit('retry')">重试</button>
+      <button type="button" class="secondary-button" v-if="showSettings" @click="$emit('open-settings')">前往设置</button>
+      <button type="button" class="secondary-button" @click="$emit('close')">关闭</button>
     </div>
   </section>
 </template>
 ```
 
-- [ ] **Step 4: 新建设置页骨架**
+- [ ] **Step 5: 在 `App.vue` 里把服务层结果映射成页面文案**
 
-Create `src/screenTranslation/SettingsView.vue` around:
+Add a mapper:
 
-```vue
-<script setup lang="ts">
-defineProps<{
-  sourceLanguage: string
-  targetLanguage: string
-  pinPreviewMode: string
-  themeMode: string
-  windowHeight: number
-}>()
+```ts
+function mapFailureToResult(code: WorkflowFailureCode) {
+  if (code === 'save-config-invalid') {
+    return {
+      title: '这次没有完成钉住',
+      message: '保存结果已开启，但还没有设置保存目录。',
+      showRetry: false,
+      showSettings: true,
+    }
+  }
 
-const emit = defineEmits<{
-  (event: 'back'): void
-  (event: 'save-plugin-settings', payload: { sourceLanguage: string; targetLanguage: string; pinPreviewMode: string }): void
-  (event: 'save-ui-settings', payload: { themeMode?: string; windowHeight?: number }): void
-}>()
-</script>
-
-<template>
-  <section class="page-shell page-shell--settings">
-    <button class="secondary-button" @click="emit('back')">返回首页</button>
-    <section class="settings-card">
-      <p class="section-label">Translation Settings</p>
-      <h1>设置</h1>
-      <p class="settings-copy">这里先保留翻译和钉住相关配置骨架，后续再接入真实服务。</p>
-      <div class="settings-group">
-        <h2>翻译方向</h2>
-        <p>源语言：{{ sourceLanguage }}</p>
-        <p>目标语言：{{ targetLanguage }}</p>
-      </div>
-      <div class="settings-group">
-        <h2>钉住预览</h2>
-        <p>当前模式：{{ pinPreviewMode }}</p>
-      </div>
-      <div class="settings-group">
-        <h2>界面外观</h2>
-        <p>主题：{{ themeMode }}</p>
-        <p>窗口高度：{{ windowHeight }} px</p>
-      </div>
-    </section>
-  </section>
-```
-
-- [ ] **Step 5: 重写 `App.vue` 为新的最小状态机**
-
-Implement around:
-
-```vue
-<script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import HomeView from './screenTranslation/HomeView.vue'
-import SettingsView from './screenTranslation/SettingsView.vue'
-
-const currentView = ref<'home' | 'settings'>('home')
-const bootstrapped = ref(false)
-const processing = ref(false)
-const currentStep = ref<'capture' | 'translate' | 'pin'>('capture')
-const homeError = ref('')
-const uiSettings = ref(window.services.getUiSettings())
-const pluginSettings = ref(window.services.getPluginSettings())
-
-const captureStateText = computed(() => currentStep.value === 'capture' ? '尚未截屏' : '截屏骨架已完成')
-const translationStateText = computed(() => currentStep.value === 'translate' || currentStep.value === 'pin' ? '翻译骨架已准备' : '等待截图后翻译')
-const pinStateText = computed(() => currentStep.value === 'pin' ? '钉住骨架已准备' : '等待翻译结果后钉住')
-
-function applyPluginWindowHeight(height: number) {
-  if (window.utools?.setExpendHeight) {
-    window.utools.setExpendHeight(height)
+  return {
+    title: '这次没有完成钉住',
+    message: '流程执行失败，请重试。',
+    showRetry: true,
+    showSettings: false,
   }
 }
-
-function startCapture() {
-  currentStep.value = 'translate'
-}
-
-function startTranslate() {
-  currentStep.value = 'pin'
-}
-
-function startPin() {
-  homeError.value = '当前版本还未接入真实钉住能力。'
-}
-
-onMounted(() => {
-  applyPluginWindowHeight(uiSettings.value.windowHeight)
-  bootstrapped.value = true
-})
-</script>
 ```
 
-- [ ] **Step 6: 重写 `main.css` 以匹配新首页和设置页骨架**
+- [ ] **Step 6: 在 `main.css` 里加瀑布流和结果页样式，不重做整套主题**
 
-Keep the existing neutral design direction, but ensure these selectors exist:
+Use CSS like:
 
 ```css
-.hero-card,
-.step-card,
-.settings-card,
-.state-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
+.records-grid {
+  column-count: 3;
+  column-gap: 16px;
+}
+
+.record-card {
+  break-inside: avoid;
+  margin-bottom: 16px;
+}
+
+.record-card__preview img {
+  width: 100%;
+  display: block;
   border-radius: 16px;
 }
-
-.hero-card,
-.step-card,
-.settings-card {
-  padding: 18px;
-}
-
-.step-card {
-  display: grid;
-  gap: 10px;
-}
 ```
 
-Also remove selectors that only target bookmark cards, search results, or bookmark sections.
-
-- [ ] **Step 7: 删除旧书签前端目录和模块**
+- [ ] **Step 7: 跑构建，确认页面层通过**
 
 Run:
 
 ```bash
-rm -rf /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/bookmarks
-```
-
-Expected: 旧书签模块整体移除，只保留 `screenTranslation` 目录。
-
-- [ ] **Step 8: 运行首页骨架文本检查**
-
-Run:
-
-```bash
-rg -n "截屏|翻译|钉住|设置" \
-  /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/App.vue \
-  /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/HomeView.vue \
-  /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/SettingsView.vue
-```
-
-Expected: PASS，能命中新页面骨架文案。
-
-- [ ] **Step 9: 提交前端骨架替换**
-
-Run:
-
-```bash
-git -C /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation add src
-git -C /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation commit -m "feat: add screen translation skeleton views"
-```
-
-Expected: 提交成功，前端已切换到新插件骨架。
-
-### Task 5: 清理 legacy 兼容层并对齐最终测试
-
-**Files:**
-- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/preload/services.js`
-- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/tests/preload/localState.test.mjs`
-- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/package.json`
-- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/package-lock.json`
-
-- [ ] **Step 1: 删除 Task 3 过渡期留下的 legacy preload 兼容层**
-
-Use this rule:
-
-```text
-Task 4 完成后，旧 App 已不再依赖 getBookmarkSettings / getBookmarkUiSettings / loadChromeBookmarks 等兼容方法。
-此时应从 services.js 中删除 quick-bookmarks 相关 key、legacy 兼容 API 和旧错误文案，
-只保留 getUiSettings / saveUiSettings / getPluginSettings / savePluginSettings 四个正式桥接方法。
-```
-
-- [ ] **Step 2: 同步清理因旧书签模块保留而暂时留下的依赖与测试文案**
-
-Use this rule:
-
-```text
-如果 package.json 里仍为中间态保留了 pinyin-pro，应在这一步删除，并同步更新 package-lock.json。
-同时把 localState.test.mjs 里任何仅用于兼容旧书签桥接的断言、旧 key、旧错误路径文案一起清掉，
-让测试只覆盖当前插件真正保留的 preload 语义。
-```
-
-- [ ] **Step 3: 保留仍然服务当前工程的测试**
-
-Use this rule:
-
-```text
-theme.test.mjs 如果仍覆盖当前 screenTranslation/theme.js，就继续保留。
-bootShell.test.mjs 如果仍覆盖 src/bootShell.js 的真实在用逻辑，也继续保留，不删除。
-```
-
-- [ ] **Step 4: 运行全部 preload 测试**
-
-Run:
-
-```bash
-cd /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation
-npm test
-```
-
-Expected: PASS。
-
-- [ ] **Step 5: 提交 legacy 清理**
-
-Run:
-
-```bash
-git -C /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation add public/preload tests package.json package-lock.json
-git -C /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation commit -m "refactor: 清理 legacy 兼容层与旧依赖"
-```
-
-Expected: 提交成功。
-
-### Task 6: 全局替换检查与构建验证
-
-**Files:**
-- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/**/*`
-
-- [ ] **Step 1: 全局搜索旧业务关键词**
-
-Run:
-
-```bash
-cd /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation
-rg -n "quick-bookmarks|bookmark|bookmarks|Chrome Bookmarks|chrome书签|快捷书签" .
-```
-
-Expected: 只允许在设计/计划文档里命中；源码、README、配置、测试里不应再命中旧书签语义。
-
-- [ ] **Step 2: 如果源码里仍命中旧语义，逐个清理后再次搜索**
-
-Run:
-
-```bash
-cd /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation
-rg -n "quick-bookmarks|bookmark|bookmarks|Chrome Bookmarks|chrome书签|快捷书签" src public tests README.md package.json
-```
-
-Expected: 无命中。
-
-- [ ] **Step 3: 安装依赖**
-
-Run:
-
-```bash
-cd /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation
-npm install
-```
-
-Expected: 安装完成，不报缺失依赖。
-
-- [ ] **Step 4: 执行构建**
-
-Run:
-
-```bash
-cd /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation
 npm run build
 ```
 
-Expected: PASS，并生成 `dist/` 产物。
+Expected: 构建通过，说明新增结果页和记录页 props 没有类型或模板错误。
 
-- [ ] **Step 5: 汇总当前骨架的真实边界**
-
-Document these exact points in the final implementation summary:
-
-```text
-- 当前只完成工程迁移和骨架替换
-- 首页与设置页语义已切到新插件
-- preload 只保留新设置桥接
-- 还没有接入真实截屏、翻译和钉住能力
-```
-
-- [ ] **Step 6: 提交最终迁移结果**
+- [ ] **Step 8: 提交页面重写**
 
 Run:
 
 ```bash
-git -C /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation add .
-git -C /Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation commit -m "feat: migrate plugin scaffold to screen shot translation skeleton"
+git add src/App.vue src/screenTranslation/HomeView.vue src/screenTranslation/SettingsView.vue src/screenTranslation/ResultView.vue src/main.css
+git commit -m "feat: add records settings and failure views"
 ```
 
-Expected: 提交成功，仓库处于可继续开发的骨架状态。
+Expected: 提交成功，插件页面结构已和 spec 对齐。
+
+### Task 6: 接通目录选择、删除确认和记录交互
+
+**Files:**
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/preload/services.js`
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/App.vue`
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/SettingsView.vue`
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/src/screenTranslation/HomeView.vue`
+
+- [ ] **Step 1: 在 preload 中暴露目录选择接口**
+
+Add a bridge like:
+
+```js
+window.services.pickSaveDirectory = async () => {
+  const result = await window.utools.showOpenDialog({
+    properties: ['openDirectory'],
+  })
+
+  if (Array.isArray(result) && result[0]) {
+    return result[0]
+  }
+
+  return ''
+}
+```
+
+- [ ] **Step 2: 在设置页加“选择目录”按钮，并即时回写到设置**
+
+Use an event like:
+
+```vue
+<button type="button" class="secondary-button" @click="$emit('pick-save-directory')">
+  选择保存目录
+</button>
+```
+
+And in `App.vue`:
+
+```ts
+async function pickSaveDirectory() {
+  const directory = await getServices()?.pickSaveDirectory?.()
+  if (directory) {
+    savePluginSettings({ saveDirectory: directory })
+  }
+}
+```
+
+- [ ] **Step 3: 在记录页删除入口加设置驱动的确认逻辑**
+
+Keep the logic centralized in `App.vue`:
+
+```ts
+async function deleteRecord(recordId: string) {
+  if (pluginSettings.value.confirmBeforeDelete) {
+    const accepted = window.confirm('确认删除这张已保存的翻译结果吗？')
+    if (!accepted) return
+  }
+
+  await getServices()?.deleteSavedRecord?.(recordId)
+  await refreshRecords()
+}
+```
+
+- [ ] **Step 4: 把重钉动作接到服务层，并在失败时切到结果页**
+
+Use a flow like:
+
+```ts
+async function repinRecord(recordId: string) {
+  const result = await getServices()?.repinSavedRecord?.(recordId)
+  if (!result?.ok) {
+    workflowResult.value = {
+      visible: true,
+      code: 'repin-failed',
+      ...mapFailureToResult('repin-failed'),
+    }
+    currentView.value = 'result'
+  }
+}
+```
+
+- [ ] **Step 5: 跑测试和构建，确认目录选择与页面交互没有破现有逻辑**
+
+Run:
+
+```bash
+npm test
+npm run build
+```
+
+Expected: 所有 preload 测试通过，前端构建仍成功。
+
+- [ ] **Step 6: 提交交互接线**
+
+Run:
+
+```bash
+git add public/preload/services.js src/App.vue src/screenTranslation/SettingsView.vue src/screenTranslation/HomeView.vue
+git commit -m "feat: wire record actions and directory picking"
+```
+
+Expected: 提交成功，记录页和设置页已经接通真实交互。
+
+### Task 7: 更新文档并做完整 smoke test
+
+**Files:**
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/README.md`
+- Modify: `/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/AGENTS.md`
+
+- [ ] **Step 1: 更新 README，避免继续描述为三步流骨架首页**
+
+Replace the capability summary with:
+
+```md
+# uTools Screen Shot Translation
+
+一个运行在 uTools 中的截屏图片翻译工具。
+
+当前版本包含 3 个入口：
+
+- `截屏翻译钉住`：直接执行截屏、翻译并钉住
+- `钉住记录`：查看已保存的翻译结果并重新钉住
+- `设置`：配置翻译方向、保存目录和删除确认
+```
+
+- [ ] **Step 2: 更新 AGENTS，明确新入口和验证顺序**
+
+The updated sections must mention:
+
+```md
+- 当前 feature 已改为 3 个入口，不再是单一 `screen-shot-translation`
+- `截屏翻译钉住` 成功不打开页面，失败进入结果页
+- `钉住记录` 主页只读保存目录根目录中的总清单 JSON
+- 设置项包括翻译方向、保存开关、保存目录、删除前二次确认
+```
+
+- [ ] **Step 3: 跑完整验证**
+
+Run:
+
+```bash
+npm test
+npm run build
+```
+
+Expected: 全部测试与构建通过。
+
+- [ ] **Step 4: 做 uTools 手动 smoke test**
+
+Run and verify:
+
+```bash
+npm run dev
+```
+
+Manual checklist:
+
+```md
+1. 在 uTools 开发者工具接入 `public/plugin.json`
+2. 输入 `设置`，确认直接进入设置页
+3. 打开“保存结果图片”但不选目录，执行 `截屏翻译钉住`，确认进入失败结果页
+4. 选择保存目录后再执行 `截屏翻译钉住`，确认成功时不打开页面
+5. 输入 `钉住记录`，确认能看到最新结果在最前的瀑布流
+6. 点击一张记录图，确认会回到上次位置重新钉住
+7. 切换“删除前二次确认”开关，确认删除行为随设置变化
+```
+
+- [ ] **Step 5: 提交文档与验证收口**
+
+Run:
+
+```bash
+git add README.md AGENTS.md
+git commit -m "docs: update runtime docs for translation records flow"
+```
+
+Expected: 文档与代码边界一致，后续协作者不会再按旧骨架理解这个项目。
+
+## Self-Review
+
+- Spec coverage:
+  - 3 个入口 -> Task 1
+  - 设置模型 -> Task 2
+  - 总清单 JSON -> Task 3
+  - 主流程成功/失败 -> Task 4
+  - 记录页、设置页、失败页 -> Task 5
+  - 删除确认和目录选择 -> Task 6
+  - README / AGENTS / smoke -> Task 7
+- Placeholder scan:
+  - 已避免 `TODO`、`TBD`、`later` 这类占位词。
+  - 对缺少现成测试框架的 Vue 页面，统一要求 `npm run build` + uTools smoke，而不是写模糊的“补 UI 测试”。
+- Type consistency:
+  - 统一使用 `translationMode`、`saveTranslatedImage`、`saveDirectory`、`confirmBeforeDelete`。
+  - 统一使用失败码 `capture-cancelled / translation-failed / save-config-invalid / save-failed / pin-failed / repin-failed`。
