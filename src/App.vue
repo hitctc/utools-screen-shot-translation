@@ -22,6 +22,11 @@ import {
   resolveThemeMode,
   syncPrefersDarkState,
 } from './screenTranslation/theme.js'
+import {
+  createEmptyWorkflowResult,
+  createMainWorkflowResetState,
+  resolvePluginEnterTransition,
+} from './screenTranslation/entryFlow.js'
 
 type ServicesBridge = {
   getUiSettings?: () => UiSettings
@@ -44,13 +49,9 @@ const currentStep = ref<ScreenTranslationStep>('capture')
 const processing = ref(false)
 const uiSettings = ref<UiSettings>({ ...DEFAULT_UI_SETTINGS })
 const pluginSettings = ref<PluginSettings>({ ...DEFAULT_PLUGIN_SETTINGS })
-const workflowResult = ref<WorkflowResultState>({
-  visible: false,
-  code: '',
-  title: '',
-  message: '',
-})
+const workflowResult = ref<WorkflowResultState>(createEmptyWorkflowResult())
 const prefersDark = ref(false)
+const previewWarningMessage = ref('')
 let systemThemeQuery: MediaQueryList | null = null
 
 const resolvedThemeMode = computed(() =>
@@ -81,7 +82,11 @@ const pinStateText = computed(() =>
     : '等待翻译阶段完成后，再把结果钉住到屏幕。',
 )
 const currentWorkflowError = computed(() =>
-  currentView.value === 'home' && workflowResult.value.visible ? workflowResult.value.message : '',
+  currentView.value === 'home'
+    ? workflowResult.value.visible
+      ? workflowResult.value.message
+      : previewWarningMessage.value
+    : '',
 )
 
 // 本地兜底也要和 preload 的窗口边界一致，避免浏览器预览模式表现跑偏。
@@ -157,18 +162,15 @@ function syncUiPresentation() {
 
 // 统一的结果态先放在 App 里，后续失败码和结果页都沿着这个对象继续长。
 function resetWorkflowResult() {
-  workflowResult.value = {
-    visible: false,
-    code: '',
-    title: '',
-    message: '',
-  }
+  workflowResult.value = createEmptyWorkflowResult()
 }
 
 // 主流程状态只收口到一个地方，避免设置页和记录页把旧步骤带回首页。
 function resetMainWorkflowState() {
-  currentStep.value = 'capture'
-  processing.value = false
+  const nextState = createMainWorkflowResetState()
+
+  currentStep.value = nextState.currentStep
+  processing.value = nextState.processing
   resetWorkflowResult()
 }
 
@@ -192,26 +194,31 @@ function readPersistedState() {
   syncUiPresentation()
 }
 
+// 入口分发会先给出一份 reset 结果，这里只负责把它写回当前运行态。
+function applyMainWorkflowResetState(nextState: ReturnType<typeof createMainWorkflowResetState>) {
+  currentStep.value = nextState.currentStep
+  processing.value = nextState.processing
+  resetWorkflowResult()
+}
+
 // 入口分发先放到一个地方，后面接 records 和 result 页面时就不用再拆逻辑。
 function handlePluginEnter({ code }: { code?: ScreenTranslationFeatureCode } = {}) {
   readPersistedState()
 
-  switch (code) {
-    case 'screen-shot-translation-settings':
-      resetMainWorkflowState()
-      currentView.value = 'settings'
-      return
-    case 'screen-shot-translation-records':
-      resetMainWorkflowState()
-      currentView.value = 'records'
-      void refreshRecords()
-      return
-    case 'screen-shot-translation-run':
-    case undefined:
-      void runMainWorkflow()
-      return
-    default:
-      showUnknownPluginEnter(code)
+  const transition = resolvePluginEnterTransition(code)
+
+  if (transition.workflowResetState) {
+    applyMainWorkflowResetState(transition.workflowResetState)
+  }
+
+  if (transition.workflowResult.visible) {
+    workflowResult.value = transition.workflowResult
+  }
+
+  currentView.value = transition.nextView
+
+  if (transition.refreshRecords) {
+    void refreshRecords()
   }
 }
 
@@ -324,17 +331,6 @@ async function refreshRecords() {
   resetWorkflowResult()
 }
 
-// 未识别入口不回退到主流程，直接给出明确提示，避免配置漂移时悄悄误入首页。
-function showUnknownPluginEnter(code: string | undefined) {
-  workflowResult.value = {
-    visible: true,
-    code: '',
-    title: '未识别的入口指令',
-    message: code ? `收到未知入口指令：${code}` : '收到空的入口指令。',
-  }
-  currentView.value = 'result'
-}
-
 // 主入口先回到首页骨架，后面真正的截屏、翻译和钉住流程都从这里扩展。
 async function runMainWorkflow() {
   resetMainWorkflowState()
@@ -367,6 +363,12 @@ function savePluginSettings(partial: Partial<PluginSettings>) {
 onMounted(() => {
   attachSystemThemeListener()
   readPersistedState()
+
+  if (!getServices()) {
+    previewWarningMessage.value = '当前处于浏览器预览模式，状态保存和真实能力桥接尚未注入。'
+  } else {
+    previewWarningMessage.value = ''
+  }
 
   if (typeof window.utools?.onPluginEnter === 'function') {
     window.utools.onPluginEnter(handlePluginEnter)
