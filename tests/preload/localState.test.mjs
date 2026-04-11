@@ -23,7 +23,7 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
   delete require.cache[pinWindowManagerModulePath]
   delete require.cache[recordStoreModulePath]
 
-  if (options.customCaptureModule) {
+  if (Object.prototype.hasOwnProperty.call(options, 'customCaptureModule')) {
     require.cache[customCaptureModulePath] = {
       id: customCaptureModulePath,
       filename: customCaptureModulePath,
@@ -32,7 +32,7 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
     }
   }
 
-  if (options.pinWindowManagerModule) {
+  if (Object.prototype.hasOwnProperty.call(options, 'pinWindowManagerModule')) {
     require.cache[pinWindowManagerModulePath] = {
       id: pinWindowManagerModulePath,
       filename: pinWindowManagerModulePath,
@@ -41,7 +41,7 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
     }
   }
 
-  if (options.recordStoreModule) {
+  if (Object.prototype.hasOwnProperty.call(options, 'recordStoreModule')) {
     require.cache[recordStoreModulePath] = {
       id: recordStoreModulePath,
       filename: recordStoreModulePath,
@@ -189,6 +189,7 @@ test('services exposes the plugin settings and record store bridge', () => {
   assert.deepEqual(Object.keys(services).sort(), [
     'deleteSavedRecord',
     'getPluginSettings',
+    'getPreloadDiagnostics',
     'getTranslationCredentials',
     'getUiSettings',
     'listSavedRecords',
@@ -198,6 +199,35 @@ test('services exposes the plugin settings and record store bridge', () => {
     'savePluginSettings',
     'saveTranslationCredentials',
     'saveUiSettings',
+  ])
+
+  cleanup()
+})
+
+test('services still bootstrap the settings bridge when the custom capture and pin modules are unavailable', async () => {
+  const { services, cleanup } = loadServicesWithStorage(
+    {},
+    {
+      customCaptureModule: null,
+      pinWindowManagerModule: null,
+    },
+  )
+
+  assert.equal(typeof services.getPluginSettings, 'function')
+  assert.equal(typeof services.savePluginSettings, 'function')
+  assert.deepEqual(await services.runCaptureTranslationPin(), {
+    ok: false,
+    code: 'translation-failed',
+  })
+  assert.deepEqual(services.getPreloadDiagnostics(), [
+    {
+      moduleKey: 'customCapture',
+      message: 'customCapture did not export an object',
+    },
+    {
+      moduleKey: 'pinWindowManager',
+      message: 'pinWindowManager did not export an object',
+    },
   ])
 
   cleanup()

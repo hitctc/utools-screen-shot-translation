@@ -3,30 +3,67 @@ const {
   normalizePluginSettings,
   mergePluginSettings,
 } = require('./localState.cjs')
-const {
-  listSavedRecords,
-  deleteSavedRecord,
-  getSavedRecord,
-  saveTranslatedRecord,
-  updateSavedRecordPinState,
-} = require('./recordStore.cjs')
-const { runMainWorkflow } = require('./workflow.cjs')
-const { translateCapturedImage } = require('./baiduPictureTranslate.cjs')
-const {
-  getTranslationCredentials,
-  saveTranslationCredentials,
-} = require('./translationCredentialStore.cjs')
-const { captureImageWithCustomOverlay } = require('./customCapture.cjs')
-const {
-  pinTranslatedImage,
-  attachPinnedRecord,
-  repinSavedRecordImage,
-} = require('./pinWindowManager.cjs')
 const fs = require('fs')
 const path = require('path')
 
 const UI_SETTINGS_KEY = 'screen-shot-translation-ui-settings'
 const PLUGIN_SETTINGS_KEY = 'screen-shot-translation-settings'
+const moduleCache = {}
+const moduleLoadErrors = {}
+
+function safeRequire(moduleKey, relativePath) {
+  if (Object.prototype.hasOwnProperty.call(moduleCache, moduleKey)) {
+    return moduleCache[moduleKey]
+  }
+
+  try {
+    const loadedModule = require(relativePath)
+    if (!loadedModule || typeof loadedModule !== 'object') {
+      throw new Error(`${moduleKey} did not export an object`)
+    }
+
+    moduleCache[moduleKey] = loadedModule
+    delete moduleLoadErrors[moduleKey]
+    return loadedModule
+  } catch (error) {
+    moduleCache[moduleKey] = null
+    moduleLoadErrors[moduleKey] = error
+
+    try {
+      console.error(`[screen-shot-translation] failed to load ${moduleKey}`)
+      console.error(error)
+    } catch {
+      // preload 诊断写日志失败时保持静默，避免次生错误继续放大。
+    }
+
+    return null
+  }
+}
+
+// preload 启动时只保留本页立刻需要的轻模块，复杂桥接延迟到对应动作真正触发时再加载。
+function getRecordStoreModule() {
+  return safeRequire('recordStore', './recordStore.cjs')
+}
+
+function getWorkflowModule() {
+  return safeRequire('workflow', './workflow.cjs')
+}
+
+function getBaiduPictureTranslateModule() {
+  return safeRequire('baiduPictureTranslate', './baiduPictureTranslate.cjs')
+}
+
+function getTranslationCredentialStoreModule() {
+  return safeRequire('translationCredentialStore', './translationCredentialStore.cjs')
+}
+
+function getCustomCaptureModule() {
+  return safeRequire('customCapture', './customCapture.cjs')
+}
+
+function getPinWindowManagerModule() {
+  return safeRequire('pinWindowManager', './pinWindowManager.cjs')
+}
 
 // 渲染层每次读取 UI 设置时都先走归一化，保证主题和窗口高度字段始终完整。
 function getUiSettings() {
@@ -59,12 +96,28 @@ function savePluginSettings(partial) {
 
 // 百度凭证单独放到同步数据库文档，避免和普通 UI/插件开关混在一起。
 function readTranslationCredentials() {
-  return getTranslationCredentials(window.utools?.db)
+  const credentialStore = getTranslationCredentialStoreModule()
+  if (!credentialStore || typeof credentialStore.getTranslationCredentials !== 'function') {
+    return {
+      appId: '',
+      appKey: '',
+    }
+  }
+
+  return credentialStore.getTranslationCredentials(window.utools?.db)
 }
 
 // 设置页写凭证时也走同一份同步文档，便于多设备跟着 uTools 账号同步。
 function writeTranslationCredentials(partial) {
-  return saveTranslationCredentials(window.utools?.db, partial)
+  const credentialStore = getTranslationCredentialStoreModule()
+  if (!credentialStore || typeof credentialStore.saveTranslationCredentials !== 'function') {
+    return {
+      ...readTranslationCredentials(),
+      ...(partial && typeof partial === 'object' ? partial : {}),
+    }
+  }
+
+  return credentialStore.saveTranslationCredentials(window.utools?.db, partial)
 }
 
 function toFileUrl(filePath) {
@@ -88,14 +141,18 @@ function toFileUrl(filePath) {
 }
 
 function createPersistPinnedRecordBounds(settings) {
+  const recordStore = getRecordStoreModule()
+
   return (recordId, bounds) =>
-    updateSavedRecordPinState({
-      fs,
-      path,
-      settings,
-      recordId,
-      bounds,
-    })
+    typeof recordStore?.updateSavedRecordPinState === 'function'
+      ? recordStore.updateSavedRecordPinState({
+          fs,
+          path,
+          settings,
+          recordId,
+          bounds,
+        })
+      : Promise.resolve(null)
 }
 
 // 子窗口资源在开发态需要显式指向当前 Vite 地址，否则 createBrowserWindow 只拿到相对路径会出现白屏。
@@ -114,25 +171,43 @@ function resolveBrowserWindowAssetUrl(assetPath) {
 
 // 主流程现在接的是自定义截图、真实翻译、真实钉住和可选保存，不再依赖模板占位。
 function runCaptureTranslationPin() {
+  const workflowModule = getWorkflowModule()
+  const customCaptureModule = getCustomCaptureModule()
+  const baiduPictureTranslateModule = getBaiduPictureTranslateModule()
+  const pinWindowManagerModule = getPinWindowManagerModule()
+
+  if (
+    !workflowModule ||
+    typeof workflowModule.runMainWorkflow !== 'function' ||
+    !customCaptureModule ||
+    typeof customCaptureModule.captureImageWithCustomOverlay !== 'function' ||
+    !baiduPictureTranslateModule ||
+    typeof baiduPictureTranslateModule.translateCapturedImage !== 'function' ||
+    !pinWindowManagerModule ||
+    typeof pinWindowManagerModule.pinTranslatedImage !== 'function'
+  ) {
+    return Promise.resolve({ ok: false, code: 'translation-failed' })
+  }
+
   const settings = getPluginSettings()
   const credentials = readTranslationCredentials()
   const persistRecordPinState = createPersistPinnedRecordBounds(settings)
 
-  return runMainWorkflow({
+  return workflowModule.runMainWorkflow({
     settings,
     captureImage: async () =>
-      captureImageWithCustomOverlay({
+      customCaptureModule.captureImageWithCustomOverlay({
         utools: window.utools,
         resolveAssetUrl: resolveBrowserWindowAssetUrl,
       }),
     translateImage: async (captureResult) =>
-      translateCapturedImage({
+      baiduPictureTranslateModule.translateCapturedImage({
         captureResult,
         settings,
         credentials,
       }),
     pinImage: async (translationResult, captureResult) =>
-      pinTranslatedImage({
+      pinWindowManagerModule.pinTranslatedImage({
         utools: window.utools,
         imageSrc: translationResult?.translatedImageDataUrl,
         bounds: captureResult?.bounds,
@@ -140,7 +215,12 @@ function runCaptureTranslationPin() {
         resolveAssetUrl: resolveBrowserWindowAssetUrl,
       }),
     saveImage: async (translationResult, pinResult) => {
-      const savedRecordResult = await saveTranslatedRecord({
+      const recordStoreModule = getRecordStoreModule()
+      if (!recordStoreModule || typeof recordStoreModule.saveTranslatedRecord !== 'function') {
+        return { ok: false, code: 'save-failed' }
+      }
+
+      const savedRecordResult = await recordStoreModule.saveTranslatedRecord({
         fs,
         path,
         settings,
@@ -152,7 +232,11 @@ function runCaptureTranslationPin() {
         return { ok: false, code: 'save-failed' }
       }
 
-      const attachResult = await attachPinnedRecord({
+      if (typeof pinWindowManagerModule.attachPinnedRecord !== 'function') {
+        return { ok: false, code: 'save-failed' }
+      }
+
+      const attachResult = await pinWindowManagerModule.attachPinnedRecord({
         windowId: pinResult?.windowId,
         recordId: savedRecordResult.record.id,
         persistRecordPinState,
@@ -179,6 +263,11 @@ window.services = {
   savePluginSettings,
   getTranslationCredentials: readTranslationCredentials,
   saveTranslationCredentials: writeTranslationCredentials,
+  getPreloadDiagnostics: () =>
+    Object.entries(moduleLoadErrors).map(([moduleKey, error]) => ({
+      moduleKey,
+      message: error && typeof error.message === 'string' ? error.message : String(error || 'unknown error'),
+    })),
   // 目录选择只负责把系统选择器结果收口成单个目录字符串，取消时返回空串。
   pickSaveDirectory: async () => {
     if (!window.utools || typeof window.utools.showOpenDialog !== 'function') {
@@ -199,12 +288,37 @@ window.services = {
 
     return typeof result === 'string' ? result : ''
   },
-  listSavedRecords: () => listSavedRecords({ fs, path, settings: getPluginSettings() }),
-  deleteSavedRecord: (recordId) => deleteSavedRecord({ fs, path, settings: getPluginSettings(), recordId }),
+  listSavedRecords: () => {
+    const recordStore = getRecordStoreModule()
+    if (!recordStore || typeof recordStore.listSavedRecords !== 'function') {
+      return Promise.resolve({ records: [] })
+    }
+
+    return recordStore.listSavedRecords({ fs, path, settings: getPluginSettings() })
+  },
+  deleteSavedRecord: (recordId) => {
+    const recordStore = getRecordStoreModule()
+    if (!recordStore || typeof recordStore.deleteSavedRecord !== 'function') {
+      return Promise.resolve({ records: [] })
+    }
+
+    return recordStore.deleteSavedRecord({ fs, path, settings: getPluginSettings(), recordId })
+  },
   repinSavedRecord: async (recordId) => {
+    const recordStore = getRecordStoreModule()
+    const pinWindowManager = getPinWindowManagerModule()
+    if (
+      !recordStore ||
+      typeof recordStore.getSavedRecord !== 'function' ||
+      !pinWindowManager ||
+      typeof pinWindowManager.repinSavedRecordImage !== 'function'
+    ) {
+      return { ok: false, code: 'repin-failed' }
+    }
+
     const settings = getPluginSettings()
     const persistRecordPinState = createPersistPinnedRecordBounds(settings)
-    const record = await getSavedRecord({
+    const record = await recordStore.getSavedRecord({
       fs,
       path,
       settings,
@@ -217,7 +331,7 @@ window.services = {
 
     const absoluteImagePath = path.resolve(settings.saveDirectory, record.imageFilename)
 
-    return repinSavedRecordImage({
+    return pinWindowManager.repinSavedRecordImage({
       utools: window.utools,
       record,
       imageSrc: toFileUrl(absoluteImagePath),

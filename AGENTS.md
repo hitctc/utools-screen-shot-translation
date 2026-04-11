@@ -73,7 +73,7 @@
 - `public/preload/package.json`
   固定 `preload` 目录使用 `commonjs`，不要在这里随意切成 ESM。
 - `public/preload/services.js`
-  负责桥接 `utools.dbStorage`、`utools.db`、目录选择、记录读取/保存/删除、真实截图入口、百度翻译入口和真实钉住/重钉，并通过 `window.services` 暴露前端可消费的接口。
+  负责桥接 `utools.dbStorage`、`utools.db`、目录选择、记录读取/保存/删除、真实截图入口、百度翻译入口和真实钉住/重钉，并通过 `window.services` 暴露前端可消费的接口。当前对截图、翻译、钉住和记录等重模块改为按需加载，避免某个桥接模块异常时把设置页和记录页一起拖成白屏。
 - `public/preload/customCapture.cjs`
   负责拉起全屏截图选区窗口，并把截图结果和原始屏幕坐标一起回传给主流程。
 - `public/preload/pinWindowManager.cjs`
@@ -177,6 +177,7 @@
 - 用 uTools 开发者工具接入开发时，应选择仓库内的 `public/plugin.json`
 - 如果开发态仍然没有命中 `development.main`，`public/dev-entry.html` 会作为兜底页尝试跳转到本地 Vite 地址，而不是直接白屏
 - `public/preload/services.js`、`public/plugin.json` 或 `index.html` 变更后，不要只依赖热更新；按官方调试文档重新进入插件，必要时开启“退出到后台立即结束运行”
+- 如果再次出现“截图链路改动后所有入口一起白屏”，优先检查 `public/preload/services.js` 是否又把复杂模块放回了顶层 eager require
 
 当前项目的开发 / 预览 / 调试方式：
 
