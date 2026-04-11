@@ -123,7 +123,9 @@
 - `vite.config.js`
   Vite 构建配置；当前 `base` 固定为 `./`，用于适配 uTools 本地资源加载。
 - `dist/`
-  构建产物目录；`npm run build` 后会生成 `dist/index.html`、`dist/plugin.json`、`dist/preload/*` 和静态资源，供 uTools 实际加载。
+  构建产物目录；`npm run build` 后会生成 `dist/index.html`、`dist/plugin.json`、`dist/preload/*` 和静态资源，供 uTools 实际加载。当前构建后会额外移除 `dist/plugin.json` 里的 `development` 字段，避免构建产物继续回指本地 dev server。
+- `scripts/prepare-dist-plugin.mjs`
+  负责把构建后的 `dist/plugin.json` 改写成 release 形态，去掉仅开发联调用的 `development.main`。
 - `docs/superpowers/specs/`
   保存本轮功能设计稿。
 - `docs/superpowers/plans/`
@@ -167,7 +169,7 @@
 当前开发方式约定：
 
 - `npm run dev` 会启动 Vite 开发服务
-- `public/plugin.json` 的 `development.main` 会指向当前本地 Vite 地址
+- `public/plugin.json` 的 `development.main` 会指向当前本地 Vite 地址 `http://127.0.0.1:5173/index.html`
 - 用 uTools 开发者工具接入开发时，应选择仓库内的 `public/plugin.json`
 - `public/preload/services.js`、`public/plugin.json` 或 `index.html` 变更后，不要只依赖热更新；按官方调试文档重新进入插件，必要时开启“退出到后台立即结束运行”
 
@@ -194,6 +196,7 @@
 1. 运行 `npm run build`
 2. 确认产物已经生成到 `dist/`
 3. 在 uTools 开发者工具中选择构建后的 `dist/plugin.json` 对应产物进行验证
+4. 当前 `dist/plugin.json` 已去掉 `development.main`，构建产物验证不再依赖 `npm run dev`
 
 文档优先级约定：
 
@@ -231,6 +234,7 @@
    如果已配置百度凭证且翻译成功，应直接把翻译结果钉在原截图位置，而不是停在结果页。
 17. 拖动已经钉住的图片，再关闭并重新从 `钉住记录` 打开同一张图，确认会回到关闭前最后一次位置。
 18. 同一张记录图已处于钉住状态时，再次点击该记录，确认只出现友好提示，不会重复创建窗口。
+19. 如果使用 `dist/plugin.json` 做构建产物验证，确认在没有启动 `npm run dev` 的情况下也能正常进入记录页、设置页和主流程，而不是统一白屏。
 
 ## 6. 配置与安全约束
 
