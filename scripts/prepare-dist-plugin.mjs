@@ -5,7 +5,10 @@ import { fileURLToPath } from 'node:url'
 // 构建产物要能脱离本地 dev server 独立运行，所以 release manifest 里不能继续保留 development.main。
 export function toReleasePluginManifest(manifest) {
   const candidate = manifest && typeof manifest === 'object' ? manifest : {}
-  const nextManifest = { ...candidate }
+  const nextManifest = {
+    ...candidate,
+    main: 'index.html',
+  }
 
   delete nextManifest.development
   return nextManifest

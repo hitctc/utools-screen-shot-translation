@@ -66,6 +66,10 @@
 
 - `public/plugin.json`
   uTools 插件清单文件，定义插件入口、`preload` 路径、开发态地址、默认窗口高度和功能指令匹配规则。当前保留 3 个 feature 入口。
+- `public/dev-entry.html`
+  开发态兜底入口页。当 uTools 没有正确命中 `development.main` 时，这个页面会尝试跳转到本地 Vite 地址 `http://127.0.0.1:5173/index.html`，并在开发服务器未启动时显示明确提示，避免直接白屏。
+- `public/dev-entry-fallback.js`
+  负责开发态兜底入口页的跳转和失败提示逻辑。
 - `public/preload/package.json`
   固定 `preload` 目录使用 `commonjs`，不要在这里随意切成 ESM。
 - `public/preload/services.js`
@@ -171,6 +175,7 @@
 - `npm run dev` 会启动 Vite 开发服务
 - `public/plugin.json` 的 `development.main` 会指向当前本地 Vite 地址 `http://127.0.0.1:5173/index.html`
 - 用 uTools 开发者工具接入开发时，应选择仓库内的 `public/plugin.json`
+- 如果开发态仍然没有命中 `development.main`，`public/dev-entry.html` 会作为兜底页尝试跳转到本地 Vite 地址，而不是直接白屏
 - `public/preload/services.js`、`public/plugin.json` 或 `index.html` 变更后，不要只依赖热更新；按官方调试文档重新进入插件，必要时开启“退出到后台立即结束运行”
 
 当前项目的开发 / 预览 / 调试方式：
@@ -186,6 +191,7 @@
 8. 改 `src/` 下的前端代码时，Vite 会热更新，回到插件窗口即可看到界面变化
 9. 需要看控制台、报错、网络请求或 DOM 时，进入插件后打开 `开发者工具`
 10. 确认 `钉住记录` 页面展示瀑布流记录或受控空态，而不是旧的三步流首页
+10.1 如果看到的是开发态兜底入口页，确认它会跳到 `http://127.0.0.1:5173/index.html`；如果开发服务器未启动，应看到明确提示而不是白屏
 11. 确认 `设置` 页面可以返回记录页，且保存目录按钮、保存开关、删除确认开关都可操作
 12. 在设置页切换主题模式，确认记录页和结果页状态标签与根节点主题同步更新
 13. 在设置页拖动窗口高度，确认窗口高度立即变化；关闭并重新进入插件后，确认仍保持为上次保存值

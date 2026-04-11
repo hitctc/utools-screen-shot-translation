@@ -74,5 +74,6 @@
 
 - 开发联调时，用 uTools 开发者工具接入 [public/plugin.json](/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/plugin.json)
 - 接入 `public/plugin.json` 前，要先执行 `npm run dev`
+- [public/dev-entry.html](/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/dev-entry.html) 现在是开发态兜底入口；如果 uTools 没有命中 `development.main`，它会尝试跳转到 `http://127.0.0.1:5173/index.html`，并在开发服务器未启动时显示明确提示
 - 构建产物验证时，用 [dist/plugin.json](/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/dist/plugin.json)
 - `npm run build` 现在会自动把 `dist/plugin.json` 里的 `development` 字段去掉，避免构建产物仍然回指本地 dev server
