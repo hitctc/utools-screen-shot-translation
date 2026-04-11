@@ -1,9 +1,9 @@
 {
-  "main": "dev-entry.html",
+  "main": "index.html",
   "preload": "preload/services.js",
   "logo": "logo.png",
   "development": {
-    "main": "http://127.0.0.1:5173/index.html"
+    "main": "http://localhost:5173"
   },
   "pluginSetting": {
     "height": 640
