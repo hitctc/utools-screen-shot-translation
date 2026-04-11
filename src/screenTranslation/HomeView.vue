@@ -34,17 +34,17 @@ function handleColumnCountInput(event: Event) {
   <section class="page-shell page-shell--records">
     <header class="hero-card hero-card--compact">
       <div class="hero-card__eyebrow">
-        <p class="section-label">Screen Translation</p>
+        <p class="section-label">钉住记录</p>
         <span class="status-chip">{{ themeStatus }}</span>
       </div>
       <h1>钉住记录</h1>
       <p class="hero-copy">
-        当前页面承载已保存的钉住记录。点击缩略图会按最后位置重新钉住，删除会按设置里的确认开关执行。
+        点击缩略图会按最后位置重新钉住，删除会按设置里的确认开关执行。
       </p>
 
       <div class="records-toolbar">
         <div class="records-toolbar__meta">
-          <span class="section-label">Records</span>
+          <span class="section-label">记录总数</span>
           <strong class="records-toolbar__count">{{ records.length }} 条</strong>
         </div>
 
@@ -75,7 +75,7 @@ function handleColumnCountInput(event: Event) {
     <section
       v-else-if="records.length"
       class="records-grid"
-      :style="{ '--records-column-count': String(recordsColumnCount) }"
+      :style="{ columnCount: String(recordsColumnCount) }"
       aria-label="钉住记录列表"
     >
       <article v-for="record in records" :key="record.id" class="record-card">
@@ -119,8 +119,10 @@ function handleColumnCountInput(event: Event) {
       </p>
     </section>
 
-    <div class="actions-row actions-row--home">
-      <button type="button" class="secondary-button" @click="emit('open-settings')">设置</button>
+    <div class="records-floating-action">
+      <button type="button" class="secondary-button records-floating-action__button" @click="emit('open-settings')">
+        设置
+      </button>
     </div>
   </section>
 </template>

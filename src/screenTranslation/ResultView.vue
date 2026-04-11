@@ -20,7 +20,7 @@ const emit = defineEmits<{
   <section class="page-shell page-shell--result">
     <header class="result-card">
       <div class="hero-card__eyebrow">
-        <p class="section-label">Workflow Result</p>
+        <p class="section-label">处理结果</p>
         <span class="status-chip">{{ code || 'workflow' }}</span>
       </div>
       <h1>{{ title }}</h1>
@@ -31,7 +31,7 @@ const emit = defineEmits<{
     </header>
 
     <section class="result-card result-card--hint">
-      <p class="section-label">Next Step</p>
+      <p class="section-label">下一步</p>
       <p>
         当前页面只承载失败结果。需要重试、进入设置或关闭回到记录页时，会由结果页按钮决定下一步。
       </p>

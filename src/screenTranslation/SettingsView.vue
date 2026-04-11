@@ -76,26 +76,21 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
   <section class="page-shell page-shell--settings">
     <header class="settings-card settings-card--hero">
       <div class="hero-card__eyebrow">
-        <p class="section-label">Screen Translation</p>
+        <p class="section-label">设置</p>
         <span class="status-chip">{{ themeStatus }}</span>
       </div>
       <h1>设置</h1>
       <p class="settings-copy">
-        这里只保留当前已经落地的字段。目录选择已经接通，重钉和真实删除流程还在后续任务里，这一页只负责保存契约。
+        这里集中管理翻译、保存和界面配置。
       </p>
-      <div class="actions-row actions-row--settings">
-        <button type="button" class="secondary-button secondary-button--compact" @click="emit('back')">
-          返回记录页
-        </button>
-      </div>
     </header>
 
     <section class="settings-grid">
       <article class="settings-card">
         <div class="settings-card__header">
           <div>
-            <p class="group-title">百度图片翻译凭证</p>
-            <p class="group-copy">这里填写的 AppID 和 AppKey 会保存到 uTools 同步数据库，并跟随同一账号在多设备间同步。</p>
+            <p class="group-title">翻译凭证</p>
+            <p class="group-copy">填写百度图片翻译凭证，凭证会保存到 uTools 同步数据库，并随同一账号同步。</p>
           </div>
           <span class="status-chip">
             {{ props.translationCredentials.appId && props.translationCredentials.appKey ? '已配置' : '未配置' }}
@@ -103,7 +98,7 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
         </div>
 
         <label class="field">
-          <span class="field__label">baiduAppId</span>
+          <span class="field__label">百度 AppID</span>
           <input
             class="field__control"
             type="text"
@@ -114,7 +109,7 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
         </label>
 
         <label class="field">
-          <span class="field__label">baiduAppKey</span>
+          <span class="field__label">百度 AppKey</span>
           <input
             class="field__control"
             type="password"
@@ -133,7 +128,7 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
         <div class="settings-card__header">
           <div>
             <p class="group-title">翻译方向</p>
-            <p class="group-copy">只保留翻译模式字段，后续接真实翻译服务时再补映射。</p>
+            <p class="group-copy">控制当前截图结果的翻译方向。</p>
           </div>
           <span class="status-chip">
             {{
@@ -144,7 +139,7 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
         </div>
 
         <label class="field">
-          <span class="field__label">translationMode</span>
+          <span class="field__label">翻译方向</span>
           <select
             class="field__control field__control--select"
             :value="pluginSettings.translationMode"
@@ -160,8 +155,8 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
       <article class="settings-card">
         <div class="settings-card__header">
           <div>
-            <p class="group-title">保存结果图片</p>
-            <p class="group-copy">保存开关和目录一起组成有效配置，目录现在既可以手输，也可以通过系统选择器填写。</p>
+            <p class="group-title">结果保存</p>
+            <p class="group-copy">保存开关和目录一起组成有效配置，目录可以手动输入，也可以通过系统选择器填写。</p>
           </div>
           <span class="status-chip">{{ pluginSettings.saveTranslatedImage ? '已开启' : '已关闭' }}</span>
         </div>
@@ -172,11 +167,11 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
             :checked="pluginSettings.saveTranslatedImage"
             @change="emitSaveTranslatedImageChange(($event.target as HTMLInputElement).checked)"
           />
-          <span class="field__label">saveTranslatedImage</span>
+          <span class="field__label">保存翻译结果</span>
         </label>
 
         <label class="field">
-          <span class="field__label">saveDirectory</span>
+          <span class="field__label">保存目录</span>
           <input
             class="field__control"
             type="text"
@@ -208,8 +203,8 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
       <article class="settings-card">
         <div class="settings-card__header">
           <div>
-            <p class="group-title">删除前二次确认</p>
-            <p class="group-copy">后续接删除动作时，这个开关会决定是否先弹出确认。</p>
+            <p class="group-title">删除行为</p>
+            <p class="group-copy">控制删除记录时是否先弹出确认提示。</p>
           </div>
           <span class="status-chip">{{ pluginSettings.confirmBeforeDelete ? '需要确认' : '直接删除' }}</span>
         </div>
@@ -220,21 +215,21 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
             :checked="pluginSettings.confirmBeforeDelete"
             @change="emitConfirmBeforeDeleteChange(($event.target as HTMLInputElement).checked)"
           />
-          <span class="field__label">confirmBeforeDelete</span>
+          <span class="field__label">删除前确认</span>
         </label>
       </article>
 
       <article class="settings-card">
         <div class="settings-card__header">
           <div>
-            <p class="group-title">界面主题</p>
-            <p class="group-copy">主题继续走同一份 UI 设置，首页和设置页会共用这组状态。</p>
+            <p class="group-title">界面偏好</p>
+            <p class="group-copy">主题和窗口高度会保存在同一份界面设置里。</p>
           </div>
           <span class="status-chip">{{ themeStatus }}</span>
         </div>
 
         <label class="field">
-          <span class="field__label">themeMode</span>
+          <span class="field__label">主题模式</span>
           <select
             class="field__control field__control--select"
             :value="uiSettings.themeMode"
@@ -247,7 +242,7 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
         </label>
 
         <label class="field">
-          <span class="field__label">windowHeight: {{ uiSettings.windowHeight }} px</span>
+          <span class="field__label">窗口高度: {{ uiSettings.windowHeight }} px</span>
           <input
             class="range-control"
             type="range"
@@ -271,5 +266,11 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
         </div>
       </article>
     </section>
+
+    <div class="settings-floating-action">
+      <button type="button" class="secondary-button settings-floating-action__button" @click="emit('back')">
+        返回记录页
+      </button>
+    </div>
   </section>
 </template>

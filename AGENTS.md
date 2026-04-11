@@ -52,6 +52,8 @@
   - 自定义截图当前只支持鼠标所在屏幕，不支持跨屏联合选区
   - “当前哪些图片已钉住”只保存在插件进程内存里；插件进程结束后，只保留 manifest 中的最后位置
 - 当前技术栈：`Vue 3 + Vite 6 + @vitejs/plugin-vue + utools-api-types + Node built-in node:test`
+- 当前视觉基线：Nothing 风格中文桌面工具表达，深色优先、浅色同步，主题强调色固定为 `#d71921`
+- 当前界面字体：`Doto / Space Grotesk / Space Mono`
 - 当前运行模型：
   - `uTools` 进入插件后由 `src/App.vue` 按 feature code 切到 `records / settings / result`，或执行 `run` 主流程入口
   - `public/preload/services.js` 通过 `window.services` 暴露当前正式保留的设置、记录、目录选择和主流程桥接能力
@@ -59,6 +61,7 @@
   - `src/screenTranslation/*` 负责记录页、设置页、结果页和对应 view-state 映射
 
 当前仓库已经进入真实“截屏 -> 翻译 -> 钉住”闭环阶段，但多屏选区、进程外钉住状态恢复这些增强能力仍未完成。不要把这些增强项误说成已支持。
+当前界面不要再往玻璃拟态、厚阴影或大渐变方向扩散；样式层级优先靠排版、边框和间距控制。
 
 ## 3. 关键目录与职责
 
