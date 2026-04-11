@@ -60,7 +60,6 @@
       <div id="hint">拖拽选择截图区域，按 Esc 取消</div>
     </div>
     <script>
-      const electronModule = typeof require === 'function' ? require('electron') : null
       const root = document.getElementById('root')
       const selectionElement = document.getElementById('selection')
       let captureChannel = ''
@@ -100,33 +99,10 @@
         selectionElement.style.height = `${nextRect.height}px`
       }
 
-      async function captureDisplayImage({ displayId, scaleFactor }) {
-        const desktopCapturer = electronModule && electronModule.desktopCapturer
-        if (!desktopCapturer || typeof desktopCapturer.getSources !== 'function') {
-          throw new Error('desktopCapturer-unavailable')
-        }
-
-        const thumbnailWidth = Math.max(1, Math.round(displayBounds.width * scaleFactor))
-        const thumbnailHeight = Math.max(1, Math.round(displayBounds.height * scaleFactor))
-        const sources = await desktopCapturer.getSources({
-          types: ['screen'],
-          thumbnailSize: {
-            width: thumbnailWidth,
-            height: thumbnailHeight,
-          },
-        })
-        const matchedSource =
-          sources.find((source) => String(source.display_id || source.displayId || '') === String(displayId)) ||
-          sources[0]
-
-        if (!matchedSource || !matchedSource.thumbnail) {
+      async function captureDisplayImage(dataUrl) {
+        if (typeof dataUrl !== 'string' || !dataUrl.trim()) {
           throw new Error('display-source-missing')
         }
-
-        const dataUrl =
-          typeof matchedSource.thumbnail.toDataURL === 'function'
-            ? matchedSource.thumbnail.toDataURL()
-            : `data:image/png;base64,${Buffer.from(matchedSource.thumbnail.toPNG()).toString('base64')}`
 
         const image = new Image()
         image.src = dataUrl
@@ -225,10 +201,7 @@
         displayBounds = payload && payload.displayBounds ? payload.displayBounds : displayBounds
 
         try {
-          await captureDisplayImage({
-            displayId: payload && payload.displayId,
-            scaleFactor: payload && payload.scaleFactor ? payload.scaleFactor : 1,
-          })
+          await captureDisplayImage(payload && payload.imageDataUrl)
         } catch {
           sendToParent({ type: 'cancel' })
         }

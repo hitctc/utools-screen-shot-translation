@@ -44,6 +44,22 @@ function normalizeCaptureBounds(bounds) {
   return { x, y, width, height }
 }
 
+function resolveThumbnailDataUrl(thumbnail) {
+  if (!thumbnail || typeof thumbnail !== 'object') {
+    return ''
+  }
+
+  if (typeof thumbnail.toDataURL === 'function') {
+    return String(thumbnail.toDataURL()).trim()
+  }
+
+  if (typeof thumbnail.toPNG === 'function') {
+    return `data:image/png;base64,${Buffer.from(thumbnail.toPNG()).toString('base64')}`
+  }
+
+  return ''
+}
+
 function closeWindow(windowInstance) {
   if (!windowInstance || typeof windowInstance.close !== 'function') {
     return
@@ -84,7 +100,31 @@ function captureImageWithCustomOverlay({
     return Promise.resolve({ ok: false, code: 'capture-cancelled' })
   }
 
-  return new Promise((resolve) => {
+  const desktopCaptureSources =
+    typeof runtime.desktopCaptureSources === 'function' ? runtime.desktopCaptureSources.bind(runtime) : null
+  if (!desktopCaptureSources) {
+    return Promise.resolve({ ok: false, code: 'capture-cancelled' })
+  }
+
+  return desktopCaptureSources({
+    types: ['screen'],
+    thumbnailSize: {
+      width: Math.max(1, Math.round(display.bounds.width * display.scaleFactor)),
+      height: Math.max(1, Math.round(display.bounds.height * display.scaleFactor)),
+    },
+  })
+    .then((sources) => {
+      const matchedSource =
+        (Array.isArray(sources) ? sources : []).find(
+          (source) => String(source?.display_id || '') === String(display.id),
+        ) || (Array.isArray(sources) ? sources[0] : null)
+      const imageDataUrl = resolveThumbnailDataUrl(matchedSource?.thumbnail)
+
+      if (!imageDataUrl) {
+        return { ok: false, code: 'capture-cancelled' }
+      }
+
+      return new Promise((resolve) => {
     let captureWindow = null
     let didHideMainWindow = false
     let finished = false
@@ -173,9 +213,8 @@ function captureImageWithCustomOverlay({
           await captureWindow.webContents.executeJavaScript(
             `window.__SCREEN_TRANSLATION_CAPTURE_INIT__(${JSON.stringify({
               channel,
-              displayId: display.id,
               displayBounds: display.bounds,
-              scaleFactor: display.scaleFactor,
+              imageDataUrl,
             })})`,
             true,
           )
@@ -192,7 +231,9 @@ function captureImageWithCustomOverlay({
 
     channel = `screen-translation:capture:${captureWindow.id}`
     ipcRenderer.on(channel, handleMessage)
-  })
+      })
+    })
+    .catch(() => ({ ok: false, code: 'capture-cancelled' }))
 }
 
 module.exports = {
