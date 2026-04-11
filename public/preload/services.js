@@ -10,33 +10,17 @@ const {
   getTranslationCredentials,
   saveTranslationCredentials,
 } = require('./translationCredentialStore.cjs')
+const { captureImageWithCustomOverlay } = require('./customCapture.cjs')
+const {
+  pinTranslatedImage,
+  attachPinnedRecord,
+  repinSavedRecordImage,
+} = require('./pinWindowManager.cjs')
 const fs = require('fs')
 const path = require('path')
 
 const UI_SETTINGS_KEY = 'screen-shot-translation-ui-settings'
 const PLUGIN_SETTINGS_KEY = 'screen-shot-translation-settings'
-
-// 主流程先回退到官方截图能力，先保证设置页、记录页和翻译链路能稳定进入。
-function captureImageWithUtools(utools) {
-  return new Promise((resolve) => {
-    if (!utools || typeof utools.screenCapture !== 'function') {
-      resolve({ ok: false, code: 'capture-cancelled' })
-      return
-    }
-
-    utools.screenCapture((image) => {
-      if (typeof image === 'string' && image.trim()) {
-        resolve({
-          ok: true,
-          image,
-        })
-        return
-      }
-
-      resolve({ ok: false, code: 'capture-cancelled' })
-    })
-  })
-}
 
 // 渲染层每次读取 UI 设置时都先走归一化，保证主题和窗口高度字段始终完整。
 function getUiSettings() {
@@ -77,22 +61,84 @@ function writeTranslationCredentials(partial) {
   return saveTranslationCredentials(window.utools?.db, partial)
 }
 
-// 主流程先恢复到“官方截图 + 百度翻译 + 失败结果页”的稳定链路，真实钉住稍后单独开分支重做。
+function toFileUrl(filePath) {
+  if (!filePath || typeof filePath !== 'string') {
+    return ''
+  }
+
+  if (filePath.startsWith('file://')) {
+    return filePath
+  }
+
+  if (/^[A-Za-z]:[\\/]/.test(filePath)) {
+    return `file:///${encodeURI(filePath.replace(/\\/g, '/'))}`
+  }
+
+  if (filePath.startsWith('/')) {
+    return `file://${encodeURI(filePath)}`
+  }
+
+  return filePath
+}
+
+// 钉住窗口拖动结束后，要把最后成功停留的位置写回记录清单。
+function createPersistPinnedRecordBounds(settings) {
+  return (recordId, bounds) =>
+    typeof recordId === 'string' && recordId.trim()
+      ? require('./recordStore.cjs').updateSavedRecordPinState({
+          fs,
+          path,
+          settings,
+          recordId,
+          bounds,
+        })
+      : Promise.resolve(null)
+}
+
+// 这条分支重新接回自定义截图和真实钉住，让主流程拿到真实选区坐标。
 function runCaptureTranslationPin() {
   const settings = getPluginSettings()
   const credentials = readTranslationCredentials()
+  const persistRecordPinState = createPersistPinnedRecordBounds(settings)
 
   return runMainWorkflow({
     settings,
-    captureImage: async () => captureImageWithUtools(window.utools),
+    captureImage: async () =>
+      captureImageWithCustomOverlay({
+        utools: window.utools,
+      }),
     translateImage: async (captureResult) =>
       translateCapturedImage({
         captureResult,
         settings,
         credentials,
       }),
-    pinImage: async () => ({ ok: false, code: 'pin-failed' }),
-    saveImage: async () => ({ ok: false, code: 'save-failed' }),
+    pinImage: async (translationResult, captureResult) =>
+      pinTranslatedImage({
+        utools: window.utools,
+        imageSrc: translationResult?.translatedImageDataUrl,
+        bounds: captureResult?.bounds,
+        persistRecordPinState,
+      }),
+    saveImage: async (translationResult, pinResult) => {
+      const savedRecordResult = await require('./recordStore.cjs').saveTranslatedRecord({
+        fs,
+        path,
+        settings,
+        translationResult,
+        bounds: pinResult?.bounds,
+      })
+
+      if (!savedRecordResult?.record?.id) {
+        return { ok: false, code: 'save-failed' }
+      }
+
+      return attachPinnedRecord({
+        windowId: pinResult?.windowId,
+        recordId: savedRecordResult.record.id,
+        persistRecordPinState,
+      })
+    },
   })
 }
 
@@ -127,10 +173,27 @@ window.services = {
   },
   listSavedRecords: () => listSavedRecords({ fs, path, settings: getPluginSettings() }),
   deleteSavedRecord: (recordId) => deleteSavedRecord({ fs, path, settings: getPluginSettings(), recordId }),
-  // 主线先回退到稳定版本，记录页点击重钉时诚实地走失败闭环。
+  // 记录页重钉走真实记录读取和真实钉住窗口，已钉住时由 pin manager 负责拦截。
   repinSavedRecord: async (recordId) => {
-    void recordId
-    return { ok: false, code: 'repin-failed' }
+    const settings = getPluginSettings()
+    const persistRecordPinState = createPersistPinnedRecordBounds(settings)
+    const record = await require('./recordStore.cjs').getSavedRecord({
+      fs,
+      path,
+      settings,
+      recordId,
+    })
+
+    if (!record) {
+      return { ok: false, code: 'repin-failed' }
+    }
+
+    return repinSavedRecordImage({
+      utools: window.utools,
+      record,
+      imageSrc: toFileUrl(path.resolve(settings.saveDirectory, record.imageFilename)),
+      persistRecordPinState,
+    })
   },
   runCaptureTranslationPin,
 }
