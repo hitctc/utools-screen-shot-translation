@@ -54,8 +54,12 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
   let credentialDoc = options.translationCredentialDoc ?? null
   const notifications = []
   global.window = {
+    location: {
+      origin: options.locationOrigin ?? 'http://localhost:5173',
+    },
     utools: {
       showOpenDialog: options.showOpenDialog ?? (async () => []),
+      isDev: options.isDev ?? (() => false),
       createBrowserWindow: options.createBrowserWindow ?? (() => null),
       hideMainWindow: options.hideMainWindow ?? (() => true),
       showMainWindow: options.showMainWindow ?? (() => true),
@@ -543,6 +547,82 @@ test('runCaptureTranslationPin starts the workflow after the custom capture brid
     ok: false,
     code: 'translation-config-invalid',
   })
+
+  cleanup()
+})
+
+test('runCaptureTranslationPin resolves child window assets against the dev server in development mode', async () => {
+  const urls = []
+
+  const { services, cleanup } = loadServicesWithStorage(
+    {
+      'screen-shot-translation-settings': {
+        translationMode: 'auto',
+        saveTranslatedImage: false,
+        saveDirectory: '',
+        confirmBeforeDelete: true,
+      },
+    },
+    {
+      isDev: () => true,
+      locationOrigin: 'http://127.0.0.1:5173',
+      customCaptureModule: {
+        captureImageWithCustomOverlay: async ({ resolveAssetUrl }) => {
+          urls.push(resolveAssetUrl('capture-overlay.html'))
+          return {
+            ok: false,
+            code: 'capture-cancelled',
+          }
+        },
+      },
+    },
+  )
+
+  await services.runCaptureTranslationPin()
+
+  assert.deepEqual(urls, ['http://127.0.0.1:5173/capture-overlay.html'])
+
+  cleanup()
+})
+
+test('repinSavedRecord resolves pin window assets against the dev server in development mode', async () => {
+  const urls = []
+
+  const { services, cleanup } = loadServicesWithStorage(
+    {
+      'screen-shot-translation-settings': {
+        translationMode: 'auto',
+        saveTranslatedImage: true,
+        saveDirectory: '/tmp/save',
+        confirmBeforeDelete: true,
+      },
+    },
+    {
+      isDev: () => true,
+      locationOrigin: 'http://127.0.0.1:5173',
+      recordStoreModule: {
+        getSavedRecord: async () => ({
+          id: 'record-1',
+          imageFilename: 'translated.png',
+          lastPinBounds: { x: 10, y: 20, width: 120, height: 90 },
+        }),
+        listSavedRecords: async () => ({ records: [] }),
+        deleteSavedRecord: async () => ({ records: [] }),
+        saveTranslatedRecord: async () => null,
+        updateSavedRecordPinState: async () => null,
+      },
+      pinWindowManagerModule: {
+        repinSavedRecordImage: async ({ resolveAssetUrl }) => {
+          urls.push(resolveAssetUrl('pin-window.html'))
+          return { ok: false, code: 'repin-failed' }
+        },
+      },
+    },
+  )
+
+  await services.repinSavedRecord('record-1')
+
+  assert.deepEqual(urls, ['http://127.0.0.1:5173/pin-window.html'])
 
   cleanup()
 })

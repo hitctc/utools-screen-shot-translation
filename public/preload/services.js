@@ -98,6 +98,20 @@ function createPersistPinnedRecordBounds(settings) {
     })
 }
 
+// 子窗口资源在开发态需要显式指向当前 Vite 地址，否则 createBrowserWindow 只拿到相对路径会出现白屏。
+function resolveBrowserWindowAssetUrl(assetPath) {
+  const normalizedAssetPath = String(assetPath || '').replace(/^[/\\]+/, '')
+  const runtime = window.utools
+  const currentOrigin =
+    typeof window.location?.origin === 'string' ? window.location.origin.replace(/\/+$/, '') : ''
+
+  if (runtime?.isDev?.() && /^https?:\/\//.test(currentOrigin) && normalizedAssetPath) {
+    return `${currentOrigin}/${normalizedAssetPath}`
+  }
+
+  return normalizedAssetPath
+}
+
 // 主流程现在接的是自定义截图、真实翻译、真实钉住和可选保存，不再依赖模板占位。
 function runCaptureTranslationPin() {
   const settings = getPluginSettings()
@@ -109,6 +123,7 @@ function runCaptureTranslationPin() {
     captureImage: async () =>
       captureImageWithCustomOverlay({
         utools: window.utools,
+        resolveAssetUrl: resolveBrowserWindowAssetUrl,
       }),
     translateImage: async (captureResult) =>
       translateCapturedImage({
@@ -122,6 +137,7 @@ function runCaptureTranslationPin() {
         imageSrc: translationResult?.translatedImageDataUrl,
         bounds: captureResult?.bounds,
         persistRecordPinState,
+        resolveAssetUrl: resolveBrowserWindowAssetUrl,
       }),
     saveImage: async (translationResult, pinResult) => {
       const savedRecordResult = await saveTranslatedRecord({
@@ -206,6 +222,7 @@ window.services = {
       record,
       imageSrc: toFileUrl(absoluteImagePath),
       persistRecordPinState,
+      resolveAssetUrl: resolveBrowserWindowAssetUrl,
     })
   },
   runCaptureTranslationPin,
