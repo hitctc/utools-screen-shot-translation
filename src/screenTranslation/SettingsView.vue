@@ -24,6 +24,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'back'): void
   (event: 'pick-save-directory'): void
+  (event: 'open-save-directory'): void
   (event: 'save-plugin-settings', payload: Partial<PluginSettings>): void
   (event: 'save-translation-credentials', payload: Partial<TranslationCredentials>): void
   (event: 'save-ui-settings', payload: Partial<UiSettings>): void
@@ -67,6 +68,8 @@ function emitResetWindowHeight() {
 
 const saveDirectoryWarning = computed(() => getSaveDirectoryWarning(props.pluginSettings))
 const translationCredentialWarning = computed(() => getTranslationCredentialWarning(props.translationCredentials))
+// 目录按钮共用同一份可用态，避免输入框里只有空白字符时仍然允许触发系统打开。
+const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim().length > 0)
 </script>
 
 <template>
@@ -186,6 +189,14 @@ const translationCredentialWarning = computed(() => getTranslationCredentialWarn
         <div class="actions-row">
           <button type="button" class="secondary-button secondary-button--compact" @click="emit('pick-save-directory')">
             选择保存目录
+          </button>
+          <button
+            type="button"
+            class="secondary-button secondary-button--compact"
+            :disabled="!hasSaveDirectory"
+            @click="emit('open-save-directory')"
+          >
+            打开目录
           </button>
         </div>
 

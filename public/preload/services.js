@@ -61,6 +61,29 @@ function writeTranslationCredentials(partial) {
   return saveTranslationCredentials(window.utools?.db, partial)
 }
 
+// 打开保存目录前先复用同一份设置归一化，避免把空白目录路径交给系统层处理。
+function openSaveDirectory() {
+  const directoryPath = getPluginSettings().saveDirectory
+
+  if (!directoryPath) {
+    return false
+  }
+
+  // 当前目录打开优先走“在文件管理器里显示”，兼容这条分支在 macOS 下点击无反应的问题。
+  if (typeof window.utools?.shellShowItemInFolder === 'function') {
+    window.utools.shellShowItemInFolder(directoryPath)
+    return true
+  }
+
+  // 旧环境如果没有 reveal 能力，再回退到通用打开路径接口。
+  if (typeof window.utools?.shellOpenPath === 'function') {
+    window.utools.shellOpenPath(directoryPath)
+    return true
+  }
+
+  return false
+}
+
 function toFileUrl(filePath) {
   if (!filePath || typeof filePath !== 'string') {
     return ''
@@ -171,6 +194,7 @@ window.services = {
 
     return typeof result === 'string' ? result : ''
   },
+  openSaveDirectory,
   listSavedRecords: () => listSavedRecords({ fs, path, settings: getPluginSettings() }),
   deleteSavedRecord: (recordId) => deleteSavedRecord({ fs, path, settings: getPluginSettings(), recordId }),
   // 记录页重钉走真实记录读取和真实钉住窗口，已钉住时由 pin manager 负责拦截。

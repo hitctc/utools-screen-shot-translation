@@ -33,7 +33,7 @@
     - `screen-shot-translation-run` -> `截屏翻译钉住`
     - `screen-shot-translation-records` -> `钉住记录`
     - `screen-shot-translation-settings` -> `设置`
-  - `钉住记录` 页面已从保存目录总清单读取记录并渲染瀑布流卡片
+  - `钉住记录` 页面已从保存目录总清单读取记录并渲染瀑布流卡片，默认 3 列，支持通过滑块调到 3~6 列并持久化
   - `设置` 页面已承载翻译方向、保存结果图片、保存目录、删除前二次确认，以及主题模式和窗口高度
   - 设置页已可填写百度图片翻译 `AppID / AppKey`
   - `失败结果页` 已承载主流程失败、重钉失败和未知失败码的统一文案与动作
@@ -73,7 +73,7 @@
 - `public/preload/translationCredentialStore.cjs`
   负责百度凭证同步文档的读取、归一化和更新。
 - `public/preload/localState.cjs`
-  负责 UI 设置与插件设置的归一化规则，包括主题模式、窗口高度，以及翻译保存相关的 `translationMode`、`saveTranslatedImage`、`saveDirectory` 和 `confirmBeforeDelete`。
+  负责 UI 设置与插件设置的归一化规则，包括主题模式、窗口高度、记录页列数，以及翻译保存相关的 `translationMode`、`saveTranslatedImage`、`saveDirectory` 和 `confirmBeforeDelete`。
 - `public/preload/recordStore.cjs`
   负责保存目录根目录下总清单文件 `.screen-translation-records.json` 的读、写、整理、删除和最后钉住位置更新。
 - `public/preload/workflow.cjs`
@@ -180,7 +180,7 @@
    开发态只有在设置页未填写时，才继续回退到 `BAIDU_FANYI_APP_ID / BAIDU_FANYI_APP_KEY`
 8. 改 `src/` 下的前端代码时，Vite 会热更新，回到插件窗口即可看到界面变化
 9. 需要看控制台、报错、网络请求或 DOM 时，进入插件后打开 `开发者工具`
-10. 确认 `钉住记录` 页面展示瀑布流记录或受控空态，而不是旧的三步流首页
+10. 确认 `钉住记录` 页面展示瀑布流记录或受控空态，而不是旧的三步流首页；有记录时默认 3 列，可通过顶部滑块调到 3~6 列
 10.1 如果看到的是开发态兜底入口页，确认它会跳到 `http://127.0.0.1:5173/index.html`；如果开发服务器未启动，应看到明确提示而不是白屏
 11. 确认 `设置` 页面可以返回记录页，且保存目录按钮、保存开关、删除确认开关都可操作
 12. 在设置页切换主题模式，确认记录页和结果页状态标签与根节点主题同步更新
@@ -281,6 +281,7 @@
   - 设置页百度凭证输入与 `utools.db` 同步存储
   - `跟随系统 / 深色 / 浅色` 三态主题
   - 主插件窗口高度设置与持久化
+  - 记录页列数 `3 ~ 6` 的滑块调节与持久化
   - `translationMode`、`saveTranslatedImage`、`saveDirectory`、`confirmBeforeDelete` 插件设置与持久化
   - 保存目录总清单读取、整理、删除
   - 记录页瀑布流展示、目录选择、删除确认开关、删除失败 warning
@@ -289,8 +290,7 @@
   - `preload` 设置接口、记录接口、目录选择接口、自定义截图桥接、真实钉住桥接与测试覆盖
 - 当前仍未具备：
   - 真实 OCR
-  - 真实钉住窗口
-  - 主流程成功时无页面直达的最终闭环
-  - 真实重钉
+  - 跨屏联合截图选区
+  - 已钉住状态的跨进程恢复
 
 后续协作者如果继续推进功能，默认应从“如何把单屏自定义截图扩到跨屏”和“当前已钉住状态如何跨进程恢复”这两条主线思考，而不是再把功能回退到官方截图占位链路。

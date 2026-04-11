@@ -25,6 +25,7 @@ export type ThemeMode = 'system' | 'dark' | 'light'
 export type UiSettings = {
   themeMode: ThemeMode
   windowHeight: number
+  recordsColumnCount: number
 }
 
 export type PluginSettings = {
@@ -50,6 +51,7 @@ export type WorkflowResultPresentation = {
 export const DEFAULT_UI_SETTINGS: UiSettings = {
   themeMode: 'system',
   windowHeight: 640,
+  recordsColumnCount: 3,
 }
 
 export const DEFAULT_PLUGIN_SETTINGS: PluginSettings = {
@@ -67,6 +69,8 @@ export const DEFAULT_TRANSLATION_CREDENTIALS: TranslationCredentials = {
 export const WINDOW_HEIGHT_MIN = 480
 export const WINDOW_HEIGHT_MAX = 960
 export const WINDOW_HEIGHT_STEP = 20
+export const RECORDS_COLUMN_COUNT_MIN = 3
+export const RECORDS_COLUMN_COUNT_MAX = 6
 
 export const THEME_OPTIONS: Array<{ value: ThemeMode; label: string }> = [
   { value: 'system', label: '跟随系统' },

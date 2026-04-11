@@ -275,18 +275,18 @@ select {
 }
 
 .records-grid {
-  column-count: 3;
+  column-count: var(--records-column-count, 3);
   column-gap: 16px;
 }
 
 .record-card {
   break-inside: avoid;
   display: grid;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding: 14px;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px;
   border: 1px solid var(--border);
-  border-radius: 22px;
+  border-radius: 18px;
   background: var(--surface);
   box-shadow: var(--shadow);
 }
@@ -298,15 +298,15 @@ select {
   width: 100%;
   padding: 0;
   border: 0;
-  border-radius: 18px;
+  border-radius: 14px;
   background: linear-gradient(135deg, color-mix(in srgb, var(--accent-soft) 80%, var(--surface-strong)), var(--surface-muted));
 }
 
 .record-card__image {
   display: block;
   width: 100%;
-  aspect-ratio: 4 / 5;
-  object-fit: cover;
+  height: auto;
+  object-fit: contain;
 }
 
 .record-card__overlay {
@@ -334,13 +334,49 @@ select {
   justify-content: space-between;
   gap: 12px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .record-card__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
+}
+
+.records-toolbar {
+  display: grid;
+  gap: 12px;
+  padding-top: 2px;
+}
+
+.records-toolbar__meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.records-toolbar__count {
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+.records-toolbar__density {
+  display: grid;
+  grid-template-columns: auto minmax(140px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.records-toolbar__density-label {
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.records-toolbar__slider {
+  width: 100%;
+  accent-color: var(--accent);
 }
 
 .secondary-button--danger {
@@ -439,8 +475,10 @@ select {
 }
 
 .secondary-button--compact {
-  min-height: 40px;
-  border-radius: 14px;
+  min-height: 34px;
+  padding-inline: 12px;
+  border-radius: 12px;
+  font-size: 13px;
 }
 
 .primary-button:hover:not(:disabled),
@@ -528,6 +566,11 @@ select {
 
   .records-grid {
     column-count: 1;
+  }
+
+  .records-toolbar__density {
+    grid-template-columns: 1fr;
+    align-items: start;
   }
 
   .page-shell {

@@ -53,9 +53,13 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
   const storage = new Map(Object.entries(initialStorage))
   let credentialDoc = options.translationCredentialDoc ?? null
   const notifications = []
+  const openedPaths = []
+  const revealedPaths = []
   global.window = {
     utools: {
       showOpenDialog: options.showOpenDialog ?? (async () => []),
+      shellOpenPath: options.shellOpenPath ?? ((fullPath) => openedPaths.push(fullPath)),
+      shellShowItemInFolder: options.shellShowItemInFolder ?? ((fullPath) => revealedPaths.push(fullPath)),
       screenCapture: options.screenCapture ?? ((callback) => callback('')),
       hideMainWindow: options.hideMainWindow ?? (() => true),
       showMainWindow: options.showMainWindow ?? (() => true),
@@ -94,6 +98,8 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
     services: global.window.services,
     storage,
     notifications,
+    openedPaths,
+    revealedPaths,
     getCredentialDoc() {
       return credentialDoc
     },
@@ -117,10 +123,12 @@ test('normalizeUiSettings keeps supported theme modes and clamps window height',
     normalizeUiSettings({
       themeMode: 'dark',
       windowHeight: 240,
+      recordsColumnCount: 9,
     }),
     {
       themeMode: 'dark',
       windowHeight: 480,
+      recordsColumnCount: 6,
     },
   )
 
@@ -128,10 +136,12 @@ test('normalizeUiSettings keeps supported theme modes and clamps window height',
     normalizeUiSettings({
       themeMode: 'light',
       windowHeight: 1200,
+      recordsColumnCount: 2,
     }),
     {
       themeMode: 'light',
       windowHeight: 960,
+      recordsColumnCount: 3,
     },
   )
 })
@@ -183,6 +193,7 @@ test('services exposes the settings and custom capture bridge', () => {
     'getTranslationCredentials',
     'getUiSettings',
     'listSavedRecords',
+    'openSaveDirectory',
     'pickSaveDirectory',
     'repinSavedRecord',
     'runCaptureTranslationPin',
@@ -216,6 +227,64 @@ test('pickSaveDirectory returns an empty string when the dialog is cancelled', a
   )
 
   assert.equal(await services.pickSaveDirectory(), '')
+
+  cleanup()
+})
+
+test('openSaveDirectory prefers revealing the persisted save directory in the file manager', async () => {
+  const { services, openedPaths, revealedPaths, cleanup } = loadServicesWithStorage({
+    'screen-shot-translation-settings': {
+      translationMode: 'auto',
+      saveTranslatedImage: true,
+      saveDirectory: ' /tmp/export ',
+      confirmBeforeDelete: true,
+    },
+  })
+
+  assert.equal(await services.openSaveDirectory(), true)
+  assert.deepEqual(revealedPaths, ['/tmp/export'])
+  assert.deepEqual(openedPaths, [])
+
+  cleanup()
+})
+
+test('openSaveDirectory falls back to shellOpenPath when reveal api is unavailable', async () => {
+  const { services, openedPaths, revealedPaths, cleanup } = loadServicesWithStorage(
+    {
+      'screen-shot-translation-settings': {
+        translationMode: 'auto',
+        saveTranslatedImage: true,
+        saveDirectory: ' /tmp/export ',
+        confirmBeforeDelete: true,
+      },
+    },
+    {
+      shellShowItemInFolder: undefined,
+    },
+  )
+
+  delete global.window.utools.shellShowItemInFolder
+
+  assert.equal(await services.openSaveDirectory(), true)
+  assert.deepEqual(revealedPaths, [])
+  assert.deepEqual(openedPaths, ['/tmp/export'])
+
+  cleanup()
+})
+
+test('openSaveDirectory returns false when save directory is empty', async () => {
+  const { services, openedPaths, revealedPaths, cleanup } = loadServicesWithStorage({
+    'screen-shot-translation-settings': {
+      translationMode: 'auto',
+      saveTranslatedImage: true,
+      saveDirectory: '   ',
+      confirmBeforeDelete: true,
+    },
+  })
+
+  assert.equal(await services.openSaveDirectory(), false)
+  assert.deepEqual(openedPaths, [])
+  assert.deepEqual(revealedPaths, [])
 
   cleanup()
 })
@@ -261,12 +330,14 @@ test('getUiSettings reads normalized values from storage', () => {
     'screen-shot-translation-ui-settings': {
       themeMode: 'dark',
       windowHeight: 1200,
+      recordsColumnCount: 5,
     },
   })
 
   assert.deepEqual(services.getUiSettings(), {
     themeMode: 'dark',
     windowHeight: 960,
+    recordsColumnCount: 5,
   })
 
   cleanup()
@@ -277,16 +348,19 @@ test('saveUiSettings merges partial updates with the persisted ui settings', () 
     'screen-shot-translation-ui-settings': {
       themeMode: 'light',
       windowHeight: 720,
+      recordsColumnCount: 3,
     },
   })
 
   const result = services.saveUiSettings({
     windowHeight: 300,
+    recordsColumnCount: 6,
   })
 
   assert.deepEqual(result, {
     themeMode: 'light',
     windowHeight: 480,
+    recordsColumnCount: 6,
   })
   assert.deepEqual(storage.get('screen-shot-translation-ui-settings'), result)
 

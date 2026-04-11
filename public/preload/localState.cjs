@@ -1,6 +1,7 @@
 const DEFAULT_UI_SETTINGS = {
   themeMode: 'system',
   windowHeight: 640,
+  recordsColumnCount: 3,
 }
 
 const DEFAULT_PLUGIN_SETTINGS = {
@@ -12,6 +13,8 @@ const DEFAULT_PLUGIN_SETTINGS = {
 
 const WINDOW_HEIGHT_MIN = 480
 const WINDOW_HEIGHT_MAX = 960
+const RECORDS_COLUMN_COUNT_MIN = 3
+const RECORDS_COLUMN_COUNT_MAX = 6
 const VALID_THEME_MODES = new Set(['system', 'dark', 'light'])
 const VALID_TRANSLATION_MODES = new Set(['auto', 'en-to-zh', 'zh-to-en'])
 
@@ -20,6 +23,7 @@ function normalizeUiSettings(raw) {
   const data = raw && typeof raw === 'object' ? raw : {}
   const themeMode = VALID_THEME_MODES.has(data.themeMode) ? data.themeMode : DEFAULT_UI_SETTINGS.themeMode
   const windowHeight = Math.floor(Number(data.windowHeight))
+  const recordsColumnCount = Math.floor(Number(data.recordsColumnCount))
 
   return {
     themeMode,
@@ -27,6 +31,10 @@ function normalizeUiSettings(raw) {
       Number.isFinite(windowHeight) && windowHeight > 0
         ? Math.min(Math.max(windowHeight, WINDOW_HEIGHT_MIN), WINDOW_HEIGHT_MAX)
         : DEFAULT_UI_SETTINGS.windowHeight,
+    recordsColumnCount:
+      Number.isFinite(recordsColumnCount) && recordsColumnCount > 0
+        ? Math.min(Math.max(recordsColumnCount, RECORDS_COLUMN_COUNT_MIN), RECORDS_COLUMN_COUNT_MAX)
+        : DEFAULT_UI_SETTINGS.recordsColumnCount,
   }
 }
 

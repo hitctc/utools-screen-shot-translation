@@ -7,6 +7,8 @@ import {
   DEFAULT_PLUGIN_SETTINGS,
   DEFAULT_TRANSLATION_CREDENTIALS,
   DEFAULT_UI_SETTINGS,
+  RECORDS_COLUMN_COUNT_MAX,
+  RECORDS_COLUMN_COUNT_MIN,
   WINDOW_HEIGHT_MAX,
   WINDOW_HEIGHT_MIN,
   type PluginSettings,
@@ -56,6 +58,7 @@ type ServicesBridge = {
   getTranslationCredentials?: () => TranslationCredentials
   saveTranslationCredentials?: (partial: Partial<TranslationCredentials>) => TranslationCredentials
   pickSaveDirectory?: () => Promise<string>
+  openSaveDirectory?: () => Promise<boolean> | boolean
   listSavedRecords?: () => Promise<SavedRecordManifest>
   deleteSavedRecord?: (recordId: string) => Promise<unknown>
   repinSavedRecord?: (recordId: string) => Promise<RecordBridgeResult>
@@ -90,8 +93,8 @@ const themeStatus = computed(() =>
 const recordsEmptyStateTitle = '暂时还没有钉住记录'
 const recordsEmptyStateCopy = computed(() =>
   previewWarningMessage.value
-    ? `${previewWarningMessage.value} 当前还没有接入真实记录桥接，后续完成截屏、翻译、钉住后，这里会显示保存下来的记录。`
-    : '当前还没有接入真实记录桥接，后续完成截屏、翻译、钉住后，这里会显示保存下来的记录。',
+    ? `${previewWarningMessage.value} 当前保存目录里还没有可展示的钉住记录。`
+    : '当前保存目录里还没有可展示的钉住记录。',
 )
 
 // 本地兜底也要和 preload 的窗口边界一致，避免浏览器预览模式表现跑偏。
@@ -106,6 +109,7 @@ function normalizeUiSettings(raw: Partial<UiSettings> | null | undefined): UiSet
     ? (candidate.themeMode as ThemeMode)
     : DEFAULT_UI_SETTINGS.themeMode
   const parsedWindowHeight = Math.floor(Number(candidate.windowHeight))
+  const parsedRecordsColumnCount = Math.floor(Number(candidate.recordsColumnCount))
 
   return {
     themeMode,
@@ -113,6 +117,10 @@ function normalizeUiSettings(raw: Partial<UiSettings> | null | undefined): UiSet
       Number.isFinite(parsedWindowHeight) && parsedWindowHeight > 0
         ? clampWindowHeight(parsedWindowHeight)
         : DEFAULT_UI_SETTINGS.windowHeight,
+    recordsColumnCount:
+      Number.isFinite(parsedRecordsColumnCount) && parsedRecordsColumnCount > 0
+        ? Math.min(Math.max(parsedRecordsColumnCount, RECORDS_COLUMN_COUNT_MIN), RECORDS_COLUMN_COUNT_MAX)
+        : DEFAULT_UI_SETTINGS.recordsColumnCount,
   }
 }
 
@@ -220,7 +228,7 @@ async function refreshRecords() {
   }
 }
 
-// 记录页上的重钉先走服务桥接，当前没有真实 pin 能力时统一落到结果页失败态。
+// 记录页上的重钉统一走 preload 桥接，失败时再落到结果页统一提示。
 async function repinRecord(recordId: string) {
   const services = getServices()
   const result = await services?.repinSavedRecord?.(recordId)
@@ -274,6 +282,13 @@ async function pickSaveDirectory() {
   }
 }
 
+// 打开目录动作只负责透传给 preload，让系统能力继续收口在 bridge 里。
+async function openSaveDirectory() {
+  const services = getServices()
+
+  await services?.openSaveDirectory?.()
+}
+
 // 结果页的“重试”要跟着失败来源走，不能把重钉失败误导成重新开始截屏主流程。
 async function retryWorkflowResult() {
   if (resultRetryMode.value === 'repin' && resultRetryRecordId.value) {
@@ -284,7 +299,7 @@ async function retryWorkflowResult() {
   await runMainWorkflowEntry()
 }
 
-// 主流程只在 run 入口触发，先调用 preload 里的占位编排，再把失败码映射成结果页。
+// 主流程只在 run 入口触发，先调用 preload 的真实编排，再把失败码映射成结果页。
 async function runMainWorkflowEntry() {
   const services = getServices()
 
@@ -336,6 +351,11 @@ function saveUiSettings(partial: Partial<UiSettings>) {
 
   uiSettings.value = normalizeUiSettings(nextSettings)
   syncUiPresentation()
+}
+
+// 记录页列数属于纯 UI 偏好，拖动滑块后立即落到 UiSettings，避免额外确认动作。
+function updateRecordsColumnCount(recordsColumnCount: number) {
+  saveUiSettings({ recordsColumnCount })
 }
 
 // 插件设置只持久化当前页展示的字段，避免未来真实能力接入前再引入额外状态。
@@ -477,9 +497,11 @@ onBeforeUnmount(() => {
     :empty-state-copy="recordsEmptyStateCopy"
     :warning="recordsWarningMessage"
     :theme-status="themeStatus"
+    :records-column-count="uiSettings.recordsColumnCount"
     @repin-record="repinRecord"
     @delete-record="deleteRecord"
     @open-settings="openSettings"
+    @update-records-column-count="updateRecordsColumnCount"
   />
 
   <SettingsView
@@ -489,6 +511,7 @@ onBeforeUnmount(() => {
     :ui-settings="uiSettings"
     :theme-status="themeStatus"
     @back="goRecords"
+    @open-save-directory="openSaveDirectory"
     @pick-save-directory="pickSaveDirectory"
     @save-plugin-settings="savePluginSettings"
     @save-translation-credentials="saveTranslationCredentials"
