@@ -91,7 +91,7 @@ test('plugin enter transitions flow through the same app state adapter that App.
     resolvePluginEnterTransition('screen-shot-translation-unknown'),
   )
 
-  assert.deepEqual(runState, createResetAppState('home'))
+  assert.deepEqual(runState, createResetAppState('idle'))
   assert.deepEqual(recordsState, createResetAppState('records'))
   assert.deepEqual(settingsState, createResetAppState('settings'))
   assert.equal(unknownState.currentView, 'result')

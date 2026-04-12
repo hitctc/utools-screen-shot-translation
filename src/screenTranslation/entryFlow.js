@@ -46,9 +46,13 @@ export function resolvePluginEnterTransition(code) {
         refreshRecords: true,
       }
     case 'screen-shot-translation-run':
+      return {
+        ...resolveWorkflowResetTransition('idle'),
+        refreshRecords: false,
+      }
     case undefined:
       return {
-        ...resolveWorkflowResetTransition('home'),
+        ...resolveWorkflowResetTransition('records'),
         refreshRecords: false,
       }
     default:

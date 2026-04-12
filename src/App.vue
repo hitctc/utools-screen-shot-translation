@@ -546,7 +546,7 @@ function detachSystemThemeListener() {
   systemThemeQuery.removeListener(handleSystemThemeChange)
 }
 
-// 所有入口都在渲染层统一收口；run 入口依赖 feature.mainHide 静默执行，不需要先展示主窗口。
+// 渲染层只承接 records/settings/result；run 入口改成 preload 无 UI feature，不再进入页面路由。
 async function handlePluginEnter(event: { code?: string } = {}) {
   readPersistedState()
 
@@ -560,8 +560,14 @@ async function handlePluginEnter(event: { code?: string } = {}) {
     return
   }
 
-  if (event.code === 'screen-shot-translation-run' || event.code === undefined) {
-    currentView.value = 'idle'
+  // run feature 已经在 preload 直接启动截图；这里遇到 run 时保持当前视图不变，避免白色占位页露出来。
+  if (event.code === 'screen-shot-translation-run') {
+    return
+  }
+
+  // 没有 feature code 时默认回记录页，避免手动打开插件或恢复主窗口时落到空白 idle。
+  if (event.code === undefined) {
+    goRecords()
     return
   }
 

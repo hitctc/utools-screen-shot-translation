@@ -22,11 +22,12 @@ const path = require('path')
 const UI_SETTINGS_KEY = 'screen-shot-translation-ui-settings'
 const PLUGIN_SETTINGS_KEY = 'screen-shot-translation-settings'
 const RUN_FEATURE_CODE = 'screen-shot-translation-run'
-const WORKFLOW_RESULT_EVENT = 'screen-shot-translation:workflow-result'
+const RECORDS_FEATURE_CODE = 'screen-shot-translation-records'
+const SETTINGS_FEATURE_CODE = 'screen-shot-translation-settings'
+const PANEL_INIT_EVENT = 'screen-shot-translation:panel-init'
 
-let pendingPluginEnter = null
-let pendingWorkflowResult = null
 let runningPreloadWorkflow = false
+let panelWindow = null
 
 function loadElectronModule(explicitElectron) {
   if (explicitElectron && typeof explicitElectron === 'object') {
@@ -99,57 +100,201 @@ function revealPluginWindow(runtime = window.utools) {
   }
 }
 
-function handlePreloadPluginEnter(event = {}) {
-  pendingPluginEnter = event && typeof event === 'object' ? event : {}
+const PANEL_HTML_PATH = 'panel.html'
 
-  if (pendingPluginEnter.code !== RUN_FEATURE_CODE) {
+// 模板插件模式下不能再依赖 plugin main 壳，所以 records/settings/result 都改成显式打开自定义面板窗口。
+function normalizePanelView(view) {
+  switch (view) {
+    case 'settings':
+      return 'settings'
+    case 'result':
+      return 'result'
+    case 'records':
+    default:
+      return 'records'
+  }
+}
+
+function isUsablePanelWindow(candidate) {
+  if (!candidate || typeof candidate !== 'object') {
+    return false
+  }
+
+  if (typeof candidate.isDestroyed === 'function') {
+    try {
+      return candidate.isDestroyed() === false
+    } catch {
+      return false
+    }
+  }
+
+  return true
+}
+
+function clearPanelWindow(candidate) {
+  if (candidate && candidate === panelWindow) {
+    panelWindow = null
+  }
+}
+
+// records/settings/result 面板窗口只应服务于面板视图；run 主流程开始前必须先把它关掉，避免被截进截图里。
+function dismissPanelWindow() {
+  const candidate = panelWindow
+  panelWindow = null
+
+  if (!isUsablePanelWindow(candidate)) {
+    return false
+  }
+
+  try {
+    candidate.hide?.()
+  } catch {
+    // 关闭前先隐藏只是锦上添花，失败时继续尝试彻底关闭窗口。
+  }
+
+  try {
+    candidate.close?.()
+  } catch {
+    // 某些 BrowserWindow mock 可能没有 close，继续回退 destroy。
+  }
+
+  try {
+    candidate.destroy?.()
+  } catch {
+    // 没有 destroy 或销毁失败时不再扩大异常，窗口引用已被清理。
+  }
+
+  return true
+}
+
+function attachPanelWindowLifecycle(candidate) {
+  if (!isUsablePanelWindow(candidate) || typeof candidate.on !== 'function') {
     return
   }
+
+  try {
+    candidate.on('closed', () => clearPanelWindow(candidate))
+    candidate.on('close', () => clearPanelWindow(candidate))
+  } catch {
+    // BrowserWindow 生命周期监听只是为了清理引用，失败时不影响主路径。
+  }
+}
+
+function sendPanelInitPayload(targetWindow, payload) {
+  if (!isUsablePanelWindow(targetWindow)) {
+    return false
+  }
+
+  const normalizedPayload = payload && typeof payload === 'object' ? payload : {}
+
+  try {
+    if (typeof targetWindow.webContents?.send === 'function') {
+      targetWindow.webContents.send(PANEL_INIT_EVENT, normalizedPayload)
+      return true
+    }
+  } catch {
+    // 继续回退到 executeJavaScript，避免部分环境里 webContents.send 不可用。
+  }
+
+  try {
+    if (typeof targetWindow.webContents?.executeJavaScript === 'function') {
+      const serializedPayload = JSON.stringify(normalizedPayload)
+      targetWindow.webContents.executeJavaScript(
+        `window.__PANEL_INIT__ = ${serializedPayload}; window.dispatchEvent(new CustomEvent(${JSON.stringify(
+          PANEL_INIT_EVENT,
+        )}, { detail: window.__PANEL_INIT__ }));`,
+      )
+      return true
+    }
+  } catch {
+    // 面板窗口没有拿到 init payload 时，页面仍可按 URL query 渲染默认视图。
+  }
+
+  return false
+}
+
+// records/settings/result 共用一个轻量面板窗口，避免 plugin main 页面壳再次参与运行链路。
+function openPanelWindow({ view, result } = {}, runtime = window.utools) {
+  if (!runtime || typeof runtime.createBrowserWindow !== 'function') {
+    return false
+  }
+
+  const normalizedView = normalizePanelView(view)
+  const payload = {
+    view: normalizedView,
+    result: result && typeof result === 'object' ? result : null,
+  }
+
+  if (isUsablePanelWindow(panelWindow)) {
+    sendPanelInitPayload(panelWindow, payload)
+    panelWindow.show?.()
+    panelWindow.focus?.()
+    return true
+  }
+
+  const nextWindow = runtime.createBrowserWindow(
+    `${PANEL_HTML_PATH}?view=${encodeURIComponent(normalizedView)}`,
+    {
+      title: '截屏翻译并钉住',
+      width: 1120,
+      height: getUiSettings().windowHeight,
+      minWidth: 760,
+      minHeight: 520,
+      useContentSize: true,
+      show: false,
+      webPreferences: {
+        preload: 'preload/panel-preload.js',
+      },
+    },
+    (createdWindow) => {
+      const targetWindow = createdWindow || nextWindow
+      if (!isUsablePanelWindow(targetWindow)) {
+        return
+      }
+
+      panelWindow = targetWindow
+      attachPanelWindowLifecycle(targetWindow)
+      sendPanelInitPayload(targetWindow, payload)
+      targetWindow.show?.()
+      targetWindow.focus?.()
+    },
+  )
+
+  if (isUsablePanelWindow(nextWindow)) {
+    panelWindow = nextWindow
+    attachPanelWindowLifecycle(nextWindow)
+  }
+
+  return true
+}
+
+function openRecordsWindow(runtime = window.utools) {
+  return openPanelWindow({ view: 'records' }, runtime)
+}
+
+function openSettingsWindow(runtime = window.utools) {
+  return openPanelWindow({ view: 'settings' }, runtime)
+}
+
+function openResultWindow(result, runtime = window.utools) {
+  return openPanelWindow({ view: 'result', result }, runtime)
+}
+
+// 截图主流程只允许在 preload 跑一个实例，避免 uTools 重复触发时叠加多个截图会话。
+function startRunFeatureWorkflow() {
+  dismissPanelWindow()
 
   if (runningPreloadWorkflow) {
     return
   }
 
-  pendingWorkflowResult = null
   runningPreloadWorkflow = true
 
   Promise.resolve(runCaptureTranslationPin())
-    .then((result) => {
-      if (result && result.ok === false) {
-        pendingWorkflowResult = result
-        emitWorkflowResult(result)
-      }
-    })
+    .then(() => undefined)
     .finally(() => {
       runningPreloadWorkflow = false
     })
-}
-
-// 渲染层挂载后会主动消费一次 preload 缓存的进入事件，避免首个 run 入口时序丢失。
-function consumePendingPluginEnter() {
-  const nextEvent = pendingPluginEnter
-  pendingPluginEnter = null
-  return nextEvent
-}
-
-// run 入口失败时，渲染层要能直接消费 preload 已经拿到的失败结果。
-function consumePendingWorkflowResult() {
-  const nextResult = pendingWorkflowResult
-  pendingWorkflowResult = null
-  return nextResult
-}
-
-// preload 触发截图后，如果失败态需要结果页承载，就用自定义事件把结果同步给已挂载的渲染层。
-function emitWorkflowResult(result) {
-  if (typeof window?.dispatchEvent !== 'function' || typeof CustomEvent !== 'function') {
-    return
-  }
-
-  try {
-    window.dispatchEvent(new CustomEvent(WORKFLOW_RESULT_EVENT, { detail: result }))
-  } catch {
-    // 事件广播只是加速渲染层拿到失败结果，失败时继续保留 pending 缓存兜底。
-  }
 }
 
 // 渲染层每次读取 UI 设置时都先走归一化，保证主题和窗口高度字段始终完整。
@@ -310,6 +455,11 @@ function captureImageViaOfficialApi(runtime = window.utools) {
     }
 
     try {
+      // 参考官方模板插件示例，截图前先收起当前插件窗口，避免插件自己的壳子被带进截图。
+      if (typeof runtime.hideMainWindow === 'function') {
+        runtime.hideMainWindow()
+      }
+
       runtime.screenCapture((image) => {
         const normalizedImage = typeof image === 'string' ? image.trim() : ''
 
@@ -376,31 +526,54 @@ function runCaptureTranslationPin() {
     }
 
     if (result && result.ok === false && result.code === 'translation-failed') {
-      revealPluginWindow(window.utools)
-      return {
+      const failureResult = {
         ...result,
         translationDebug: getLastTranslationDebug(),
       }
+      openResultWindow(failureResult, window.utools)
+      return failureResult
     }
 
     if (result && result.ok === false) {
-      revealPluginWindow(window.utools)
+      openResultWindow(result, window.utools)
     }
 
     return result
   })
 }
 
-// preload 只暴露当前截图翻译插件正式保留的本地设置接口。
-if (typeof window.utools?.onPluginEnter === 'function') {
-  window.utools.onPluginEnter(handlePreloadPluginEnter)
+// 模板插件模式下，三个入口都通过 window.exports 收口，避免 plugin main 页面壳再次参与运行。
+window.exports = {
+  ...(window.exports || {}),
+  [RUN_FEATURE_CODE]: {
+    mode: 'none',
+    args: {
+      enter: () => {
+        startRunFeatureWorkflow()
+      },
+    },
+  },
+  [RECORDS_FEATURE_CODE]: {
+    mode: 'none',
+    args: {
+      enter: () => {
+        openRecordsWindow(window.utools)
+      },
+    },
+  },
+  [SETTINGS_FEATURE_CODE]: {
+    mode: 'none',
+    args: {
+      enter: () => {
+        openSettingsWindow(window.utools)
+      },
+    },
+  },
 }
 
 window.services = {
   ...(window.services || {}),
   concealPluginWindow,
-  consumePendingPluginEnter,
-  consumePendingWorkflowResult,
   getUiSettings,
   saveUiSettings,
   getPluginSettings,
@@ -408,6 +581,9 @@ window.services = {
   getTranslationCredentials: readTranslationCredentials,
   saveTranslationCredentials: writeTranslationCredentials,
   getLastTranslationDebug,
+  openRecordsWindow,
+  openSettingsWindow,
+  openResultWindow,
   // 目录选择只负责把系统选择器结果收口成单个目录字符串，取消时返回空串。
   pickSaveDirectory: async () => {
     if (!window.utools || typeof window.utools.showOpenDialog !== 'function') {

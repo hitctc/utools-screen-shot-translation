@@ -17,8 +17,9 @@ test('resolvePluginEnterTransition maps feature codes to the expected views and 
   const runTransition = resolvePluginEnterTransition('screen-shot-translation-run')
   const settingsTransition = resolvePluginEnterTransition('screen-shot-translation-settings')
   const recordsTransition = resolvePluginEnterTransition('screen-shot-translation-records')
+  const defaultTransition = resolvePluginEnterTransition(undefined)
 
-  assert.equal(runTransition.nextView, 'home')
+  assert.equal(runTransition.nextView, 'idle')
   assert.deepEqual(runTransition.workflowResetState, createMainWorkflowResetState())
   assert.deepEqual(runTransition.workflowResult, {
     visible: false,
@@ -35,6 +36,10 @@ test('resolvePluginEnterTransition maps feature codes to the expected views and 
   assert.equal(recordsTransition.nextView, 'records')
   assert.deepEqual(recordsTransition.workflowResetState, createMainWorkflowResetState())
   assert.equal(recordsTransition.refreshRecords, true)
+
+  assert.equal(defaultTransition.nextView, 'records')
+  assert.deepEqual(defaultTransition.workflowResetState, createMainWorkflowResetState())
+  assert.equal(defaultTransition.refreshRecords, false)
 })
 
 test('settings and records transitions always reset the main workflow back to capture', () => {

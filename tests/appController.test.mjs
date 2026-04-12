@@ -97,7 +97,7 @@ test('handlePluginEnter consumes the App controller path for run, records, setti
   controller.handlePluginEnter({ code: 'screen-shot-translation-run' })
 
   assert.deepEqual(state, {
-    currentView: 'home',
+    currentView: 'idle',
     currentStep: 'capture',
     processing: false,
     workflowResult: {

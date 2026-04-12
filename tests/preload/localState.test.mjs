@@ -55,14 +55,10 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
   const notifications = []
   const openedPaths = []
   const revealedPaths = []
+  const browserWindows = []
   let outPluginCalls = 0
-  let showMainWindowCalls = 0
-  let pluginEnterHandler = null
   global.window = {
     utools: {
-      onPluginEnter: options.onPluginEnter ?? ((handler) => {
-        pluginEnterHandler = handler
-      }),
       getWindowType: Object.prototype.hasOwnProperty.call(options, 'getWindowType')
         ? options.getWindowType
         : (() => 'main'),
@@ -77,10 +73,29 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
       shellShowItemInFolder: options.shellShowItemInFolder ?? ((fullPath) => revealedPaths.push(fullPath)),
       screenCapture: options.screenCapture ?? ((callback) => callback('')),
       hideMainWindow: options.hideMainWindow ?? (() => true),
-      showMainWindow: options.showMainWindow ?? (() => {
-        showMainWindowCalls += 1
-        return true
-      }),
+      showMainWindow: options.showMainWindow ?? (() => true),
+      createBrowserWindow:
+        options.createBrowserWindow ??
+        ((url, config, callback) => {
+          const nextWindow =
+            options.browserWindow ??
+            {
+              show() {},
+              focus() {},
+              on() {},
+              isDestroyed() {
+                return false
+              },
+              webContents: {
+                send() {},
+                executeJavaScript() {},
+              },
+            }
+
+          browserWindows.push({ url, config, window: nextWindow })
+          callback?.(nextWindow)
+          return nextWindow
+        }),
       showNotification: options.showNotification ?? ((message) => notifications.push(message)),
       dbStorage: {
         getItem(key) {
@@ -121,14 +136,11 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
     getCredentialDoc() {
       return credentialDoc
     },
-    triggerPluginEnter(event) {
-      pluginEnterHandler?.(event)
+    getBrowserWindows() {
+      return browserWindows
     },
     getOutPluginCalls() {
       return outPluginCalls
-    },
-    getShowMainWindowCalls() {
-      return showMainWindowCalls
     },
     cleanup() {
       delete global.window
@@ -216,8 +228,6 @@ test('services exposes the settings and official screenshot bridge', () => {
 
   assert.deepEqual(Object.keys(services).sort(), [
     'concealPluginWindow',
-    'consumePendingPluginEnter',
-    'consumePendingWorkflowResult',
     'deleteSavedRecord',
     'getLastTranslationDebug',
     'getPluginSettings',
@@ -225,7 +235,10 @@ test('services exposes the settings and official screenshot bridge', () => {
     'getUiSettings',
     'listSavedRecords',
     'openExternalLink',
+    'openRecordsWindow',
+    'openResultWindow',
     'openSaveDirectory',
+    'openSettingsWindow',
     'pickSaveDirectory',
     'repinSavedRecord',
     'runCaptureTranslationPin',
@@ -237,13 +250,31 @@ test('services exposes the settings and official screenshot bridge', () => {
   cleanup()
 })
 
-test('preload plugin enter 只缓存 run 事件，不再额外隐藏主窗口', async () => {
+test('三个 feature 都通过 window.exports 以无 UI 模式暴露', () => {
+  const { cleanup } = loadServicesWithStorage()
+
+  assert.equal(global.window.exports['screen-shot-translation-run']?.mode, 'none')
+  assert.equal(
+    typeof global.window.exports['screen-shot-translation-run']?.args?.enter,
+    'function',
+  )
+  assert.equal(global.window.exports['screen-shot-translation-records']?.mode, 'none')
+  assert.equal(global.window.exports['screen-shot-translation-settings']?.mode, 'none')
+
+  cleanup()
+})
+
+test('run feature handler 会直接启动官方截图', async () => {
   let hideMainWindowCalls = 0
-  const { services, triggerPluginEnter, getOutPluginCalls, cleanup } = loadServicesWithStorage(
+  let screenCaptureCalls = 0
+  const { cleanup } = loadServicesWithStorage(
     {},
     {
       getWindowType: () => 'main',
-      screenCapture: (callback) => callback(''),
+      screenCapture: (callback) => {
+        screenCaptureCalls += 1
+        callback('')
+      },
       hideMainWindow: () => {
         hideMainWindowCalls += 1
         return true
@@ -251,20 +282,18 @@ test('preload plugin enter 只缓存 run 事件，不再额外隐藏主窗口', 
     },
   )
 
-  triggerPluginEnter({ code: 'screen-shot-translation-run' })
+  global.window.exports['screen-shot-translation-run'].args.enter()
   await new Promise((resolve) => setImmediate(resolve))
 
-  assert.equal(hideMainWindowCalls, 0)
-  assert.equal(getOutPluginCalls(), 0)
-  assert.deepEqual(services.consumePendingPluginEnter(), { code: 'screen-shot-translation-run' })
-  assert.equal(services.consumePendingPluginEnter(), null)
+  assert.equal(screenCaptureCalls, 1)
+  assert.equal(hideMainWindowCalls, 1)
 
   cleanup()
 })
 
-test('preload run 入口会直接启动 workflow，并把失败结果缓存给渲染层', async () => {
+test('run feature 失败时会打开结果面板窗口，而不是回到主窗口壳', async () => {
   let screenCaptureCalls = 0
-  const { services, triggerPluginEnter, getShowMainWindowCalls, cleanup } = loadServicesWithStorage(
+  const { getBrowserWindows, cleanup } = loadServicesWithStorage(
     {},
     {
       screenCapture: (callback) => {
@@ -281,38 +310,79 @@ test('preload run 入口会直接启动 workflow，并把失败结果缓存给�
     },
   )
 
-  triggerPluginEnter({ code: 'screen-shot-translation-run' })
+  global.window.exports['screen-shot-translation-run'].args.enter()
   await new Promise((resolve) => setImmediate(resolve))
 
   assert.equal(screenCaptureCalls, 1)
-  assert.equal(getShowMainWindowCalls(), 1)
-  assert.deepEqual(services.consumePendingPluginEnter(), { code: 'screen-shot-translation-run' })
-  assert.deepEqual(services.consumePendingWorkflowResult(), {
-    ok: false,
-    code: 'translation-failed',
-    translationDebug: null,
-  })
-  assert.equal(services.consumePendingWorkflowResult(), null)
+  assert.equal(getBrowserWindows().length, 1)
+  assert.equal(getBrowserWindows()[0].url, 'panel.html?view=result')
 
   cleanup()
 })
 
-test('preload plugin enter keeps records entry visible and only caches the event', () => {
-  let hideMainWindowCalls = 0
-  const { services, triggerPluginEnter, cleanup } = loadServicesWithStorage(
+test('records 和 settings feature 会复用同一个自定义面板窗口', () => {
+  const { getBrowserWindows, cleanup } = loadServicesWithStorage()
+
+  global.window.exports['screen-shot-translation-records'].args.enter()
+  global.window.exports['screen-shot-translation-settings'].args.enter()
+
+  assert.equal(getBrowserWindows()[0].url, 'panel.html?view=records')
+  assert.equal(getBrowserWindows().length, 1)
+
+  cleanup()
+})
+
+test('run feature 启动前会先关闭已经打开的面板窗口，避免被截进截图里', async () => {
+  let screenCaptureCalls = 0
+  let hideCalls = 0
+  let panelHideCalls = 0
+  let panelCloseCalls = 0
+  let panelDestroyCalls = 0
+  const panelWindow = {
+    hide() {
+      panelHideCalls += 1
+    },
+    close() {
+      panelCloseCalls += 1
+    },
+    destroy() {
+      panelDestroyCalls += 1
+    },
+    show() {},
+    focus() {},
+    on() {},
+    isDestroyed() {
+      return false
+    },
+    webContents: {
+      send() {},
+      executeJavaScript() {},
+    },
+  }
+  const { cleanup } = loadServicesWithStorage(
     {},
     {
+      browserWindow: panelWindow,
+      screenCapture: (callback) => {
+        screenCaptureCalls += 1
+        callback('')
+      },
       hideMainWindow: () => {
-        hideMainWindowCalls += 1
+        hideCalls += 1
         return true
       },
     },
   )
 
-  triggerPluginEnter({ code: 'screen-shot-translation-records' })
+  global.window.exports['screen-shot-translation-records'].args.enter()
+  global.window.exports['screen-shot-translation-run'].args.enter()
+  await new Promise((resolve) => setImmediate(resolve))
 
-  assert.equal(hideMainWindowCalls, 0)
-  assert.deepEqual(services.consumePendingPluginEnter(), { code: 'screen-shot-translation-records' })
+  assert.equal(screenCaptureCalls, 1)
+  assert.equal(hideCalls, 1)
+  assert.equal(panelHideCalls, 1)
+  assert.equal(panelCloseCalls, 1)
+  assert.equal(panelDestroyCalls, 1)
 
   cleanup()
 })

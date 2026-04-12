@@ -1,32 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { toReleasePluginManifest } from '../scripts/prepare-dist-plugin.mjs'
+import fs from 'node:fs'
+import path from 'node:path'
+import { buildStaticPlugin } from '../scripts/build-static-plugin.mjs'
 
-test('toReleasePluginManifest removes the development block but keeps release fields intact', () => {
-  const manifest = {
-    main: 'index.html',
-    preload: 'preload/services.js',
-    logo: 'logo.png',
-    development: {
-      main: 'http://127.0.0.1:5173/index.html',
-    },
-    features: [
-      {
-        code: 'screen-shot-translation-run',
-        cmds: ['截屏翻译钉住'],
-      },
-    ],
-  }
+test('buildStaticPlugin copies the public plugin manifest as-is into dist', () => {
+  buildStaticPlugin()
 
-  assert.deepEqual(toReleasePluginManifest(manifest), {
-    main: 'index.html',
-    preload: 'preload/services.js',
-    logo: 'logo.png',
-    features: [
-      {
-        code: 'screen-shot-translation-run',
-        cmds: ['截屏翻译钉住'],
-      },
-    ],
-  })
+  const publicManifest = JSON.parse(fs.readFileSync(path.resolve('public/plugin.json'), 'utf8'))
+  const distManifest = JSON.parse(fs.readFileSync(path.resolve('dist/plugin.json'), 'utf8'))
+
+  assert.deepEqual(distManifest, publicManifest)
 })

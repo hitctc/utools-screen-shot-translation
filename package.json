@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build && node scripts/prepare-dist-plugin.mjs",
+    "dev": "node scripts/build-static-plugin.mjs",
+    "build": "node scripts/build-static-plugin.mjs",
     "test": "node --test tests/preload/*.test.mjs tests/*.test.mjs"
   },
   "dependencies": {
