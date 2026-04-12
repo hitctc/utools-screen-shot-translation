@@ -34,7 +34,7 @@
 
 - 项目名称：`utools-screen-shot-translation`
 - 目标方向：做成一个在 `uTools` 内完成“截屏 -> 翻译 -> 钉住结果”的工具
-- 当前阶段：当前分支 `feature/custom-capture-pin` 已把主流程重写为“官方截图 -> 百度图片翻译 -> 默认钉图 -> 按条件保存”，不再把自定义截图 overlay 作为主路径
+- 当前阶段：当前分支 `rewrite-jquery-shell` 正在把运行壳切到“uTools 模板插件 + 静态 `HTML + jQuery + preload`”；当前主路径已收口为“官方截图 -> 百度图片翻译 -> 默认钉图 -> 按条件保存”
 - 当前真实能力：
   - 插件身份已经切换为 `uTools Screen Shot Translation`
   - `public/plugin.json` 已定义 3 个入口：
@@ -49,7 +49,7 @@
   - 支持在系统主题变化时同步刷新页面主题和状态文案
   - 支持通过 `dbStorage` 持久化 UI 设置和插件设置
   - 支持调整主插件窗口高度，并在重新进入插件时恢复
-  - 支持 Vue 挂载前显示静态首屏壳子，避免纯白空屏
+  - `public/panel.html + public/app.js + public/app.css` 已接管 `钉住记录 / 设置 / 失败结果` 的运行壳
   - 插件设置模型已切到 `translationMode / saveTranslatedImage / saveDirectory / confirmBeforeDelete`，`preload` 侧已完成归一化和测试收口
   - `public/preload/recordStore.cjs` 已接通保存目录总清单的读取、整理、保存、删除和最后钉住位置更新
   - `public/preload/baiduPictureTranslate.cjs` 已接通百度图片翻译请求发送、自动方向选择，以及 `V2` 块级回填优先的本地拼图
@@ -63,14 +63,17 @@
   - 当前主流程截图统一走 `utools.screenCapture(callback)`，因此暂不支持“按截图原位置钉回”
   - 首次钉图默认落到当前屏幕右上角；只有记录重钉时才优先回到上次保存的位置
   - “当前哪些图片已钉住”只保存在插件进程内存里；插件进程结束后，只保留 manifest 中的最后位置
-- 当前技术栈：`Vue 3 + Vite 6 + @vitejs/plugin-vue + utools-api-types + Node built-in node:test`
+- 当前技术栈：运行时已切到 `静态 HTML + jQuery + preload + Node built-in node:test`；旧 `Vue / Vite` 代码仍保留在仓库里，但先冻结，不再参与当前运行路径
 - 当前视觉基线：Nothing 风格中文桌面工具表达，深色优先、浅色同步，主题强调色固定为 `#d71921`
 - 当前界面字体：`Doto / Space Grotesk / Space Mono`
 - 当前运行模型：
-  - `uTools` 进入插件后由 `src/App.vue` 按 feature code 切到 `records / settings / result`；`run` 主流程则在 `public/preload/services.js` 的 `onPluginEnter` 阶段直接启动，渲染层只负责承载失败结果
+  - `screen-shot-translation-run / records / settings` 三个入口都由 `public/preload/services.js` 里的 `window.exports[feature].mode = 'none'` 接管
+  - `screen-shot-translation-run` 直接在 preload 启动主流程，不再经过页面壳
+  - `screen-shot-translation-records / settings` 会通过 `utools.createBrowserWindow('panel.html?...')` 打开静态面板窗口
+  - `public/panel.html + public/app.js` 只负责 `records / settings / result` 的最小 UI 承载
   - `public/preload/services.js` 通过 `window.services` 暴露当前正式保留的设置、记录、目录选择和主流程桥接能力
   - `public/preload/localState.cjs` 负责 UI 设置和插件设置的归一化
-  - `src/screenTranslation/*` 负责记录页、设置页、结果页和对应 view-state 映射
+  - 旧 `src/` 下的 Vue 页面与 `vite.config.js` 已冻结，不应再当成当前运行事实描述
 
 当前仓库已经进入真实“截屏 -> 翻译 -> 钉住”闭环阶段，但多屏选区、进程外钉住状态恢复这些增强能力仍未完成。不要把这些增强项误说成已支持。
 当前界面不要再往玻璃拟态、厚阴影或大渐变方向扩散；样式层级优先靠排版、边框和间距控制。
@@ -78,11 +81,19 @@
 ## 3. 关键目录与职责
 
 - `public/plugin.json`
-  uTools 插件清单文件，定义插件入口、`preload` 路径、开发态地址、默认窗口高度和功能指令匹配规则。当前保留 3 个 feature 入口。
+  uTools 插件清单文件，当前按模板插件模型工作：不再配置 `main`，只保留 `preload`、`pluginSetting` 和 3 个 `features`。
+- `public/panel.html`
+  当前静态面板窗口壳，承载 `钉住记录 / 设置 / 失败结果` 三种视图。
+- `public/app.js`
+  当前面板窗口的 jQuery 事件绑定与最小状态切换入口。
+- `public/app.css`
+  当前静态面板窗口样式文件。
 - `public/preload/package.json`
   固定 `preload` 目录使用 `commonjs`，不要在这里随意切成 ESM。
 - `public/preload/services.js`
-  负责桥接 `utools.dbStorage`、`utools.db`、目录选择、记录读取/保存/删除、官方截图入口、百度翻译入口和真实钉住/重钉，并通过 `window.services` 暴露前端可消费的接口。`run` 入口的首次 `onPluginEnter` 也在这里预收口，用来在渲染层挂载前先静默隐藏当前插件窗口；当前隐藏策略统一优先走 `outPlugin()`，只在不可用时才回退到 `hideMainWindow()`。
+  负责桥接 `utools.dbStorage`、`utools.db`、目录选择、记录读取/保存/删除、官方截图入口、百度翻译入口和真实钉住/重钉，并通过 `window.services` 暴露前端可消费的接口。三个 feature 入口都在这里通过 `window.exports` 以无 UI 模式接管，不应再依赖渲染层页面壳子。
+- `public/preload/panel-preload.js`
+  面板窗口专用 preload，把 `services.js` 和面板初始化事件桥接给 `public/panel.html`。
 - `public/preload/baiduPictureTranslate.cjs`
   负责百度图片翻译的图片解码、请求发送、自动方向选择，以及 `V2` 块级译文的本地拼图回填。
 - `public/preload/baiduPictureCompose.cjs`
@@ -97,26 +108,8 @@
   负责真实钉住窗口的创建、拖动、缩放、重复钉住前台提醒，以及 `lastPinBounds` 的持续回写。
 - `public/preload/workflow.cjs`
   负责主流程 `capture -> translate -> pin -> save` 的失败归因和统一返回契约，当前会透传步骤返回的明确失败码。
-- `src/App.vue`
-  当前插件 UI 总入口，负责 `records / settings / result` 三个视图切换、失败结果页映射、记录读取、删除确认、目录选择和重钉失败闭环。
-- `src/screenTranslation/HomeView.vue`
-  当前记录页视图，负责展示瀑布流记录卡片、空态、warning、删除按钮和设置入口。
-- `src/screenTranslation/SettingsView.vue`
-  设置页视图，负责百度凭证、翻译方向、保存结果图片、保存目录、删除前二次确认，以及主题模式和窗口高度的配置展示。
-- `src/screenTranslation/ResultView.vue`
-  失败结果页视图，负责展示统一失败文案和 `retry / open-settings / close` 动作。
-- `src/screenTranslation/viewState.js`
-  负责失败码文案映射、记录卡片数据映射和本地文件 `file://` URL 归一化。
-- `src/screenTranslation/theme.js`
-  负责三态主题解析、系统主题同步和状态文案格式化。
-- `src/screenTranslation/types.ts`
-  负责记录页、结果页、设置项和页面选项的前端类型与常量定义。
-- `src/main.js`
-  Vue 客户端挂载入口，同时负责在应用接管页面后移除静态首屏壳子。
-- `src/bootShell.js`
-  负责首屏静态壳子的最小移除逻辑，避免这段启动链路散落在入口文件里。
-- `src/main.css`
-  当前截屏翻译工具骨架页的基础样式和主题 token。
+- `src/`
+  旧的 Vue/Vite 前端壳，当前迁移期先冻结保留，不再参与实际运行路径；除非后续明确清理迁移债务，否则不要继续在这里加新运行逻辑。
 - `tests/preload/localState.test.mjs`
   负责当前 `preload` 正式保留的设置归一化与读写合并语义测试，包括目录选择、同步凭证桥接、官方截图桥接、真实重钉桥接和局部更新持久化。
 - `tests/preload/translationCredentialStore.test.mjs`
@@ -134,11 +127,11 @@
 - `tests/viewState.test.mjs`
   负责未知失败码兜底、记录卡片时间容错和本地文件路径归一化测试。
 - `vite.config.js`
-  Vite 构建配置；当前 `base` 固定为 `./`，用于适配 uTools 本地资源加载。
+  旧 Vite 配置，当前已冻结，不再参与实际构建。
 - `dist/`
-  构建产物目录；`npm run build` 后会生成 `dist/index.html`、`dist/plugin.json`、`dist/preload/*` 和静态资源，供 uTools 实际加载。当前构建后会额外移除 `dist/plugin.json` 里的 `development` 字段，避免构建产物继续回指本地 dev server。
-- `scripts/prepare-dist-plugin.mjs`
-  负责把构建后的 `dist/plugin.json` 改写成 release 形态，去掉仅开发联调用的 `development.main`。
+  构建产物目录；`npm run build` 后会把 `public/` 直接同步到 `dist/`，供 uTools 实际加载。
+- `scripts/build-static-plugin.mjs`
+  当前唯一构建脚本，负责把 `public/` 同步为运行中的静态插件产物。
 - `docs/superpowers/specs/`
   保存本轮功能设计稿。
 - `docs/superpowers/plans/`
@@ -146,7 +139,7 @@
 
 ## 4. 当前能力与入口约定
 
-当前插件能力全部由 `public/plugin.json` 中的 `features` 决定，并且必须和 `src/App.vue` 的初始化逻辑保持同步。
+当前插件能力全部由 `public/plugin.json` 中的 `features` 决定，并且必须和 `public/preload/services.js` 里的 `window.exports` 保持同步。
 
 当前已定义的 feature：
 
@@ -161,12 +154,12 @@
 
 - 如果新增或重命名 `feature.code`，必须同步更新：
   - `public/plugin.json`
-  - `src/App.vue`
-  - 对应前端视图或业务模块
+  - `public/preload/services.js`
+  - `public/panel.html / public/app.js`
   - `README.md` 与 `AGENTS.md`
 - 所有需要 Node.js 权限的能力，优先放到 `public/preload/`，再通过 `window.services` 给前端使用；不要把系统能力直接散落到渲染层各处。
-- 当前 UI 不使用 `vue-router`，而是在 `App.vue` 内维护 `records / settings / result` 视图切换和 `run` 主流程入口。除非需求明显升级，否则不要提前引入完整路由系统。
-  当前约束是：`run` 首次进入不应主动把主窗口顶到前台；官方截图主流程应由 preload 直接触发，渲染层不能再承担启动截图的职责。
+- 当前 UI 不再使用 `vue-router`，也不再依赖 Vue 主窗口壳；records / settings / result 的视图切换全部在 `public/app.js` 内以最小状态机维护。
+  当前约束是：`run` 首次进入不应主动把主窗口顶到前台；官方截图主流程必须由 preload 的无 UI feature handler 直接触发，静态面板窗口不能承担启动截图的职责。
 - 当前记录页、结果页和设置页已经是正式承载面；当前分支主流程里的截图、翻译、钉住与记录重钉都是真实能力。后续如果改这条链路，必须明确是增强还是回归修复。
 
 ## 5. 运行与验证
@@ -182,38 +175,37 @@
 
 当前开发方式约定：
 
-- `npm run dev` 会启动 Vite 开发服务
-- `public/plugin.json` 的 `development.main` 会指向当前本地 Vite 地址 `http://localhost:5173`
+- `npm run dev` 和 `npm run build` 当前都走静态复制脚本
+- `public/plugin.json` 已不再配置 `main` 和 `development.main`
 - 用 uTools 开发者工具接入开发时，应选择仓库内的 `public/plugin.json`
-- `public/preload/services.js`、`public/plugin.json` 或 `index.html` 变更后，不要只依赖热更新；按官方调试文档重新进入插件，必要时开启“退出到后台立即结束运行”
-- 如果再次出现“截图链路改动后所有入口一起白屏”，优先检查 `public/preload/services.js`、`public/plugin.json`、`src/main.js` 和相关子窗口 HTML 是否引入了新的启动期异常
+- `public/preload/services.js`、`public/plugin.json`、`public/panel.html` 或 `public/app.js` 变更后，不要只依赖热更新；按官方调试文档重新进入插件，必要时先断开再重新接入
+- 如果再次出现“截图链路改动后仍然先出现大白框”，先确认 uTools 是否已经完整重载了新的模板插件配置，而不是继续运行旧的带 `main` 的插件缓存
 
 当前项目的开发 / 预览 / 调试方式：
 
 1. 首次安装依赖：`npm install`
 2. 运行单测：`npm test`
-3. 启动前端开发服务：`npm run dev`
+3. 同步静态运行文件：`npm run dev`
 4. 打开 `uTools 开发者工具`，在项目里选择本仓库的 `public/plugin.json`
 5. 点击 `接入开发`
 6. 在 uTools 中通过 `钉住记录`、`设置`、`截屏翻译钉住` 三个指令验证不同入口
    其中 `截屏翻译钉住` 入口应直接进入静默截图链路，不应先展示主窗口页面壳子。
 7. 如果要验证真实翻译，优先在设置页填写百度 `AppID / Access Token`
    开发态只有在设置页未填写时，才继续回退到 `BAIDU_FANYI_APP_ID`、`BAIDU_FANYI_ACCESS_TOKEN`
-8. 改 `src/` 下的前端代码时，Vite 会热更新，回到插件窗口即可看到界面变化
+8. 改 `public/` 或 `public/preload/` 下的运行文件后，重新执行一次 `npm run dev`
 9. 需要看控制台、报错、网络请求或 DOM 时，进入插件后打开 `开发者工具`
 10. 确认 `钉住记录` 页面展示瀑布流记录或受控空态，而不是旧的三步流首页；有记录时默认 3 列，可通过顶部滑块调到 3~6 列
-10.1 如果看到的是开发态兜底入口页，确认它会跳到 `http://127.0.0.1:5173/index.html`；如果开发服务器未启动，应看到明确提示而不是白屏
 11. 确认 `设置` 页面可以返回记录页，且保存目录按钮、保存开关、删除确认开关都可操作
 12. 在设置页切换主题模式，确认记录页和结果页状态标签与根节点主题同步更新
 13. 在设置页拖动窗口高度，确认窗口高度立即变化；关闭并重新进入插件后，确认仍保持为上次保存值
-14. 每次进入插件时，确认会先看到静态首屏壳子而不是纯白空屏
+14. 每次进入 `钉住记录 / 设置 / 结果页` 时，确认看到的是 `public/panel.html` 承载的静态面板，而不是旧的 Vue 页面壳
 
 当前项目的构建预览方式：
 
 1. 运行 `npm run build`
 2. 确认产物已经生成到 `dist/`
 3. 在 uTools 开发者工具中选择构建后的 `dist/plugin.json` 对应产物进行验证
-4. 当前 `dist/plugin.json` 已去掉 `development.main`，构建产物验证不再依赖 `npm run dev`
+4. 当前 `dist/plugin.json` 会和 `public/plugin.json` 保持一致，不再依赖 `development.main`
 
 文档优先级约定：
 
@@ -256,6 +248,7 @@
 21. 鼠标点击一张已经钉住的图片让它聚焦，再按 `ESC`，确认会关闭当前这张图片；未聚焦时不应误关别的窗口。
 22. 同一张记录图已处于钉住状态时，再次点击该记录，确认不再弹系统通知，而是把现有窗口拉到前台并左右晃动提示位置。
 23. 如果使用 `dist/plugin.json` 做构建产物验证，确认在没有启动 `npm run dev` 的情况下也能正常进入记录页、设置页和主流程，而不是统一白屏。
+24. 触发 `截屏翻译钉住` 时，确认不会先出现旧主窗口白框；如果仍然出现，优先怀疑 uTools 仍在跑旧缓存，而不是直接回退业务代码。
 
 ## 6. 配置与安全约束
 
@@ -294,13 +287,13 @@
 
 ## 9. 当前阶段快照
 
-截至 `2026-04-11`，仓库状态可按下面理解：
+截至 `2026-04-12`，仓库状态可按下面理解：
 
 - 当前主线已经从参考书签项目迁移成新的截屏翻译插件工程
 - 当前已具备：
   - `截屏翻译钉住 / 钉住记录 / 设置` 三个入口
-  - 静态首屏壳子
-  - 记录页 / 设置页 / 失败结果页三种承载面
+  - 模板插件 `window.exports` 三入口
+  - `public/panel.html` 承载的记录页 / 设置页 / 失败结果页三种静态面板
   - 官方 `screenCapture` 截图桥接
   - 百度图片翻译真实调用（优先读取设置页同步的 `V2` 凭证，开发态支持环境变量兜底）
   - 百度图片翻译 `V2` 块级回填的本地拼图生成
@@ -318,5 +311,6 @@
   - 真实 OCR
   - 按截图原位置钉回
   - 已钉住状态的跨进程恢复
+  - 对旧 Vue/Vite 冻结代码的彻底清理
 
 后续协作者如果继续推进功能，默认应从“如何在保持主路径简洁的前提下增强截图能力”和“当前已钉住状态如何跨进程恢复”这两条主线思考，而不是再把主流程重新拉回冗余分支。
