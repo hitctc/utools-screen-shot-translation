@@ -5,22 +5,117 @@ const {
 } = require('./localState.cjs')
 const { listSavedRecords, deleteSavedRecord } = require('./recordStore.cjs')
 const { runMainWorkflow } = require('./workflow.cjs')
-const { translateCapturedImage } = require('./baiduPictureTranslate.cjs')
+const { translateCapturedImage, getLastTranslationDebug } = require('./baiduPictureTranslate.cjs')
 const {
   getTranslationCredentials,
   saveTranslationCredentials,
 } = require('./translationCredentialStore.cjs')
-const { captureImageWithCustomOverlay } = require('./customCapture.cjs')
 const {
   pinTranslatedImage,
   attachPinnedRecord,
   repinSavedRecordImage,
 } = require('./pinWindowManager.cjs')
+const { buildImageDataUrlFromBuffer } = require('./imageMime.cjs')
 const fs = require('fs')
 const path = require('path')
 
 const UI_SETTINGS_KEY = 'screen-shot-translation-ui-settings'
 const PLUGIN_SETTINGS_KEY = 'screen-shot-translation-settings'
+const RUN_FEATURE_CODE = 'screen-shot-translation-run'
+
+let pendingPluginEnter = null
+
+function loadElectronModule(explicitElectron) {
+  if (explicitElectron && typeof explicitElectron === 'object') {
+    return explicitElectron
+  }
+
+  try {
+    return require('electron')
+  } catch {
+    return null
+  }
+}
+
+// 外链统一交给系统浏览器打开，避免在 uTools 容器里把普通超链接当成不可用的 webview 导航。
+async function openExternalLink(url, runtime = {}) {
+  const normalizedUrl = typeof url === 'string' ? url.trim() : ''
+  const electronShell = loadElectronModule(runtime.electron)?.shell
+
+  if (!/^https?:\/\//i.test(normalizedUrl)) {
+    return false
+  }
+
+  if (typeof electronShell?.openExternal === 'function') {
+    try {
+      return await electronShell.openExternal(normalizedUrl)
+    } catch {
+      return false
+    }
+  }
+
+  return false
+}
+
+// run 入口需要在 preload 阶段就先把主窗口收起，避免页面壳子先露出来挡住截图区域。
+function concealPluginWindow(runtime = window.utools) {
+  const windowType = typeof runtime?.getWindowType === 'function' ? runtime.getWindowType() : 'main'
+
+  if (windowType === 'detach' && typeof runtime?.outPlugin === 'function') {
+    runtime.outPlugin()
+    return
+  }
+
+  if (typeof runtime?.hideMainWindow === 'function') {
+    runtime.hideMainWindow()
+  }
+}
+
+// 成功钉住后更稳的收尾是直接退出插件主窗口，让钉住窗体单独留在桌面上。
+function dismissPluginWindowAfterSuccess(runtime = window.utools) {
+  if (typeof runtime?.outPlugin === 'function') {
+    runtime.outPlugin()
+    return
+  }
+
+  if (typeof runtime?.hideMainWindow === 'function') {
+    runtime.hideMainWindow()
+  }
+}
+
+// run 入口默认隐藏主窗口，失败时由 preload 直接恢复可见性，避免只依赖渲染层时序。
+function revealPluginWindow(runtime = window.utools) {
+  if (typeof runtime?.showMainWindow !== 'function') {
+    return
+  }
+
+  try {
+    runtime.showMainWindow()
+  } catch {
+    // 恢复失败时继续静默兜底，不把窗口状态问题扩大成新的异常。
+  }
+}
+
+function handlePreloadPluginEnter(event = {}) {
+  pendingPluginEnter = event && typeof event === 'object' ? event : {}
+
+  if (pendingPluginEnter.code !== RUN_FEATURE_CODE) {
+    return
+  }
+
+  try {
+    concealPluginWindow(window.utools)
+  } catch {
+    // 主窗口隐藏失败时继续交给后续流程兜底，这里不把入口事件放大成启动异常。
+  }
+}
+
+// 渲染层挂载后会主动消费一次 preload 缓存的进入事件，避免首个 run 入口时序丢失。
+function consumePendingPluginEnter() {
+  const nextEvent = pendingPluginEnter
+  pendingPluginEnter = null
+  return nextEvent
+}
 
 // 渲染层每次读取 UI 设置时都先走归一化，保证主题和窗口高度字段始终完整。
 function getUiSettings() {
@@ -61,24 +156,62 @@ function writeTranslationCredentials(partial) {
   return saveTranslationCredentials(window.utools?.db, partial)
 }
 
-// 打开保存目录前先复用同一份设置归一化，避免把空白目录路径交给系统层处理。
-function openSaveDirectory() {
+// 打开保存目录优先走 Electron shell，确保这条路径不被 uTools 包装层行为差异卡住。
+async function openSaveDirectory(runtime = {}) {
   const directoryPath = getPluginSettings().saveDirectory
+  const utools = runtime.utools ?? window.utools
+  const electronShell = loadElectronModule(runtime.electron)?.shell
 
   if (!directoryPath) {
     return false
   }
 
-  // 当前目录打开优先走“在文件管理器里显示”，兼容这条分支在 macOS 下点击无反应的问题。
-  if (typeof window.utools?.shellShowItemInFolder === 'function') {
-    window.utools.shellShowItemInFolder(directoryPath)
-    return true
+  // Electron 的 openPath 会直接交给系统打开目录，成功时返回空字符串。
+  if (typeof electronShell?.openPath === 'function') {
+    try {
+      const errorMessage = await electronShell.openPath(directoryPath)
+
+      if (!errorMessage) {
+        return true
+      }
+    } catch {
+      // 这里先继续降级，不把单一路径失败直接暴露成用户可见错误。
+    }
   }
 
-  // 旧环境如果没有 reveal 能力，再回退到通用打开路径接口。
-  if (typeof window.utools?.shellOpenPath === 'function') {
-    window.utools.shellOpenPath(directoryPath)
-    return true
+  // 有些系统上 reveal 比 open 更稳，这里作为 Electron 层的第二优先级。
+  if (typeof electronShell?.showItemInFolder === 'function') {
+    try {
+      electronShell.showItemInFolder(directoryPath)
+      return true
+    } catch {
+      // 继续回退到 uTools wrapper，保持目录打开链路尽量可用。
+    }
+  }
+
+  // 兜底继续保留 uTools 自带系统 API，覆盖没有 Electron shell 的环境。
+  if (typeof utools?.shellOpenPath === 'function') {
+    try {
+      utools.shellOpenPath(directoryPath)
+      return true
+    } catch {
+      // 继续尝试 reveal 兜底。
+    }
+  }
+
+  if (typeof utools?.shellShowItemInFolder === 'function') {
+    try {
+      utools.shellShowItemInFolder(directoryPath)
+      return true
+    } catch {
+      // 最后一层兜底失败后再统一给提示。
+    }
+  }
+
+  try {
+    utools?.showNotification?.('打开保存目录失败，请检查目录路径是否有效。')
+  } catch {
+    // 通知本身只是辅助诊断，不需要再继续抛错。
   }
 
   return false
@@ -104,6 +237,21 @@ function toFileUrl(filePath) {
   return filePath
 }
 
+// 记录页重钉优先把本地图片转成 data url，再交给 pin window 做透明白底处理。
+// 这样可以避开 file:// 图片在子窗口 canvas 里读像素时可能直接失败的问题。
+async function readImageAsDataUrl(filePath) {
+  if (!filePath || typeof filePath !== 'string') {
+    return ''
+  }
+
+  try {
+    const imageBuffer = await fs.promises.readFile(filePath)
+    return buildImageDataUrlFromBuffer(imageBuffer)
+  } catch {
+    return ''
+  }
+}
+
 // 钉住窗口拖动结束后，要把最后成功停留的位置写回记录清单。
 function createPersistPinnedRecordBounds(settings) {
   return (recordId, bounds) =>
@@ -118,7 +266,35 @@ function createPersistPinnedRecordBounds(settings) {
       : Promise.resolve(null)
 }
 
-// 这条分支重新接回自定义截图和真实钉住，让主流程拿到真实选区坐标。
+// 主流程改回官方 screenCapture，只收口成图片结果，不再把自定义选区坐标带进主路径。
+function captureImageViaOfficialApi(runtime = window.utools) {
+  return new Promise((resolve) => {
+    if (!runtime || typeof runtime.screenCapture !== 'function') {
+      resolve({ ok: false, code: 'capture-cancelled' })
+      return
+    }
+
+    try {
+      runtime.screenCapture((image) => {
+        const normalizedImage = typeof image === 'string' ? image.trim() : ''
+
+        if (!normalizedImage.startsWith('data:image/')) {
+          resolve({ ok: false, code: 'capture-cancelled' })
+          return
+        }
+
+        resolve({
+          ok: true,
+          image: normalizedImage,
+        })
+      })
+    } catch {
+      resolve({ ok: false, code: 'capture-cancelled' })
+    }
+  })
+}
+
+// 主流程只保留截图、翻译、钉图、保存四步；截图统一改回官方 screenCapture。
 function runCaptureTranslationPin() {
   const settings = getPluginSettings()
   const credentials = readTranslationCredentials()
@@ -126,21 +302,18 @@ function runCaptureTranslationPin() {
 
   return runMainWorkflow({
     settings,
-    captureImage: async () =>
-      captureImageWithCustomOverlay({
-        utools: window.utools,
-      }),
+    captureImage: async () => captureImageViaOfficialApi(window.utools),
     translateImage: async (captureResult) =>
       translateCapturedImage({
         captureResult,
         settings,
         credentials,
       }),
-    pinImage: async (translationResult, captureResult) =>
+    pinImage: async (translationResult) =>
       pinTranslatedImage({
         utools: window.utools,
         imageSrc: translationResult?.translatedImageDataUrl,
-        bounds: captureResult?.bounds,
+        bounds: null,
         persistRecordPinState,
       }),
     saveImage: async (translationResult, pinResult) => {
@@ -162,18 +335,42 @@ function runCaptureTranslationPin() {
         persistRecordPinState,
       })
     },
+  }).then((result) => {
+    if (result && result.ok === true) {
+      dismissPluginWindowAfterSuccess(window.utools)
+    }
+
+    if (result && result.ok === false) {
+      revealPluginWindow(window.utools)
+    }
+
+    if (result && result.ok === false && result.code === 'translation-failed') {
+      return {
+        ...result,
+        translationDebug: getLastTranslationDebug(),
+      }
+    }
+
+    return result
   })
 }
 
 // preload 只暴露当前截图翻译插件正式保留的本地设置接口。
+if (typeof window.utools?.onPluginEnter === 'function') {
+  window.utools.onPluginEnter(handlePreloadPluginEnter)
+}
+
 window.services = {
   ...(window.services || {}),
+  concealPluginWindow,
+  consumePendingPluginEnter,
   getUiSettings,
   saveUiSettings,
   getPluginSettings,
   savePluginSettings,
   getTranslationCredentials: readTranslationCredentials,
   saveTranslationCredentials: writeTranslationCredentials,
+  getLastTranslationDebug,
   // 目录选择只负责把系统选择器结果收口成单个目录字符串，取消时返回空串。
   pickSaveDirectory: async () => {
     if (!window.utools || typeof window.utools.showOpenDialog !== 'function') {
@@ -195,6 +392,7 @@ window.services = {
     return typeof result === 'string' ? result : ''
   },
   openSaveDirectory,
+  openExternalLink,
   listSavedRecords: () => listSavedRecords({ fs, path, settings: getPluginSettings() }),
   deleteSavedRecord: (recordId) => deleteSavedRecord({ fs, path, settings: getPluginSettings(), recordId }),
   // 记录页重钉走真实记录读取和真实钉住窗口，已钉住时由 pin manager 负责拦截。
@@ -212,10 +410,13 @@ window.services = {
       return { ok: false, code: 'repin-failed' }
     }
 
+    const imagePath = path.resolve(settings.saveDirectory, record.imageFilename)
+    const inlineImageSrc = await readImageAsDataUrl(imagePath)
+
     return repinSavedRecordImage({
       utools: window.utools,
       record,
-      imageSrc: toFileUrl(path.resolve(settings.saveDirectory, record.imageFilename)),
+      imageSrc: inlineImageSrc || toFileUrl(imagePath),
       persistRecordPinState,
     })
   },

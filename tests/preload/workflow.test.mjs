@@ -14,7 +14,7 @@ function createWorkflowDeps(overrides = {}) {
       saveDirectory: '',
       confirmBeforeDelete: true,
     },
-    captureImage: async () => ({ ok: true, imagePath: '/tmp/capture.png' }),
+    captureImage: async () => ({ ok: true, image: 'data:image/png;base64,captured' }),
     translateImage: async () => ({ ok: true, text: 'translated text' }),
     pinImage: async () => ({ ok: true, bounds: { left: 10, top: 20, right: 30, bottom: 40 } }),
     saveImage: async () => ({ ok: true, recordId: 'record-1' }),
@@ -215,7 +215,7 @@ test('runMainWorkflow skips saveImage when saving is disabled', async () => {
   assert.equal(saveCalls, 0)
 })
 
-test('runMainWorkflow returns success with pin bounds when every step succeeds', async () => {
+test('runMainWorkflow returns success when capture only carries an image and downstream steps preserve it', async () => {
   const calls = []
 
   const result = await runMainWorkflow({
@@ -228,16 +228,15 @@ test('runMainWorkflow returns success with pin bounds when every step succeeds',
       },
       captureImage: async () => ({
         ok: true,
-        imagePath: '/tmp/capture.png',
-        bounds: { x: 8, y: 12, width: 32, height: 32 },
+        image: 'data:image/png;base64,captured',
       }),
       translateImage: async () => ({ ok: true, text: 'translated text', provider: 'stub' }),
       pinImage: async (translationResult, captureResult) => {
         calls.push({ step: 'pin', translationResult, captureResult })
         return {
-        ok: true,
-        bounds: { left: 8, top: 12, right: 40, bottom: 44 },
-        windowId: 'pin-1',
+          ok: true,
+          bounds: { left: 100, top: 24, right: 340, bottom: 144 },
+          windowId: 'pin-1',
         }
       },
       saveImage: async (translationResult, pinResult) => {
@@ -258,18 +257,14 @@ test('runMainWorkflow returns success with pin bounds when every step succeeds',
     {
       step: 'pin',
       translationResult: { ok: true, text: 'translated text', provider: 'stub' },
-      captureResult: {
-        ok: true,
-        imagePath: '/tmp/capture.png',
-        bounds: { x: 8, y: 12, width: 32, height: 32 },
-      },
+      captureResult: { ok: true, image: 'data:image/png;base64,captured' },
     },
     {
       step: 'save',
       translationResult: { ok: true, text: 'translated text', provider: 'stub' },
       pinResult: {
         ok: true,
-        bounds: { left: 8, top: 12, right: 40, bottom: 44 },
+        bounds: { left: 100, top: 24, right: 340, bottom: 144 },
         windowId: 'pin-1',
       },
     },

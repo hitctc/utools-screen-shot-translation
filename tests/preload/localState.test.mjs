@@ -13,15 +13,26 @@ const {
 
 function loadServicesWithStorage(initialStorage = {}, options = {}) {
   const servicesModulePath = path.resolve('public/preload/services.js')
+  const baiduPictureTranslateModulePath = path.resolve('public/preload/baiduPictureTranslate.cjs')
   const credentialStoreModulePath = path.resolve('public/preload/translationCredentialStore.cjs')
   const customCaptureModulePath = path.resolve('public/preload/customCapture.cjs')
   const pinWindowManagerModulePath = path.resolve('public/preload/pinWindowManager.cjs')
   const recordStoreModulePath = path.resolve('public/preload/recordStore.cjs')
   delete require.cache[servicesModulePath]
+  delete require.cache[baiduPictureTranslateModulePath]
   delete require.cache[credentialStoreModulePath]
   delete require.cache[customCaptureModulePath]
   delete require.cache[pinWindowManagerModulePath]
   delete require.cache[recordStoreModulePath]
+
+  if (Object.prototype.hasOwnProperty.call(options, 'baiduPictureTranslateModule')) {
+    require.cache[baiduPictureTranslateModulePath] = {
+      id: baiduPictureTranslateModulePath,
+      filename: baiduPictureTranslateModulePath,
+      loaded: true,
+      exports: options.baiduPictureTranslateModule,
+    }
+  }
 
   if (Object.prototype.hasOwnProperty.call(options, 'customCaptureModule')) {
     require.cache[customCaptureModulePath] = {
@@ -55,14 +66,32 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
   const notifications = []
   const openedPaths = []
   const revealedPaths = []
+  let outPluginCalls = 0
+  let showMainWindowCalls = 0
+  let pluginEnterHandler = null
   global.window = {
     utools: {
+      onPluginEnter: options.onPluginEnter ?? ((handler) => {
+        pluginEnterHandler = handler
+      }),
+      getWindowType: Object.prototype.hasOwnProperty.call(options, 'getWindowType')
+        ? options.getWindowType
+        : (() => 'main'),
+      outPlugin: Object.prototype.hasOwnProperty.call(options, 'outPlugin')
+        ? options.outPlugin
+        : (() => {
+            outPluginCalls += 1
+            return true
+          }),
       showOpenDialog: options.showOpenDialog ?? (async () => []),
       shellOpenPath: options.shellOpenPath ?? ((fullPath) => openedPaths.push(fullPath)),
       shellShowItemInFolder: options.shellShowItemInFolder ?? ((fullPath) => revealedPaths.push(fullPath)),
       screenCapture: options.screenCapture ?? ((callback) => callback('')),
       hideMainWindow: options.hideMainWindow ?? (() => true),
-      showMainWindow: options.showMainWindow ?? (() => true),
+      showMainWindow: options.showMainWindow ?? (() => {
+        showMainWindowCalls += 1
+        return true
+      }),
       showNotification: options.showNotification ?? ((message) => notifications.push(message)),
       dbStorage: {
         getItem(key) {
@@ -103,9 +132,19 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
     getCredentialDoc() {
       return credentialDoc
     },
+    triggerPluginEnter(event) {
+      pluginEnterHandler?.(event)
+    },
+    getOutPluginCalls() {
+      return outPluginCalls
+    },
+    getShowMainWindowCalls() {
+      return showMainWindowCalls
+    },
     cleanup() {
       delete global.window
       delete require.cache[servicesModulePath]
+      delete require.cache[baiduPictureTranslateModulePath]
       delete require.cache[credentialStoreModulePath]
       delete require.cache[customCaptureModulePath]
       delete require.cache[pinWindowManagerModulePath]
@@ -188,11 +227,15 @@ test('services exposes the settings and custom capture bridge', () => {
   const { services, cleanup } = loadServicesWithStorage()
 
   assert.deepEqual(Object.keys(services).sort(), [
+    'concealPluginWindow',
+    'consumePendingPluginEnter',
     'deleteSavedRecord',
+    'getLastTranslationDebug',
     'getPluginSettings',
     'getTranslationCredentials',
     'getUiSettings',
     'listSavedRecords',
+    'openExternalLink',
     'openSaveDirectory',
     'pickSaveDirectory',
     'repinSavedRecord',
@@ -201,6 +244,88 @@ test('services exposes the settings and custom capture bridge', () => {
     'saveTranslationCredentials',
     'saveUiSettings',
   ])
+
+  cleanup()
+})
+
+test('preload plugin enter hides the main window immediately for main run windows and caches the event', () => {
+  let hideMainWindowCalls = 0
+  const { services, triggerPluginEnter, getOutPluginCalls, cleanup } = loadServicesWithStorage(
+    {},
+    {
+      getWindowType: () => 'main',
+      hideMainWindow: () => {
+        hideMainWindowCalls += 1
+        return true
+      },
+    },
+  )
+
+  triggerPluginEnter({ code: 'screen-shot-translation-run' })
+
+  assert.equal(hideMainWindowCalls, 1)
+  assert.equal(getOutPluginCalls(), 0)
+  assert.deepEqual(services.consumePendingPluginEnter(), { code: 'screen-shot-translation-run' })
+  assert.equal(services.consumePendingPluginEnter(), null)
+
+  cleanup()
+})
+
+test('preload plugin enter uses outPlugin for detached run windows', () => {
+  const { services, triggerPluginEnter, getOutPluginCalls, cleanup } = loadServicesWithStorage(
+    {},
+    {
+      getWindowType: () => 'detach',
+    },
+  )
+
+  triggerPluginEnter({ code: 'screen-shot-translation-run' })
+
+  assert.equal(getOutPluginCalls(), 1)
+  assert.deepEqual(services.consumePendingPluginEnter(), { code: 'screen-shot-translation-run' })
+
+  cleanup()
+})
+
+test('preload plugin enter keeps records entry visible and only caches the event', () => {
+  let hideMainWindowCalls = 0
+  const { services, triggerPluginEnter, cleanup } = loadServicesWithStorage(
+    {},
+    {
+      hideMainWindow: () => {
+        hideMainWindowCalls += 1
+        return true
+      },
+    },
+  )
+
+  triggerPluginEnter({ code: 'screen-shot-translation-records' })
+
+  assert.equal(hideMainWindowCalls, 0)
+  assert.deepEqual(services.consumePendingPluginEnter(), { code: 'screen-shot-translation-records' })
+
+  cleanup()
+})
+
+test('openExternalLink prefers electron shell openExternal for https urls', async () => {
+  const { services, cleanup } = loadServicesWithStorage()
+  const openedUrls = []
+
+  assert.equal(
+    await services.openExternalLink('https://fanyi-api.baidu.com/product/233', {
+      electron: {
+        shell: {
+          openExternal: async (url) => {
+            openedUrls.push(url)
+            return true
+          },
+        },
+      },
+    }),
+    true,
+  )
+
+  assert.deepEqual(openedUrls, ['https://fanyi-api.baidu.com/product/233'])
 
   cleanup()
 })
@@ -231,7 +356,7 @@ test('pickSaveDirectory returns an empty string when the dialog is cancelled', a
   cleanup()
 })
 
-test('openSaveDirectory prefers revealing the persisted save directory in the file manager', async () => {
+test('openSaveDirectory prefers electron shell openPath when runtime shell is injected', async () => {
   const { services, openedPaths, revealedPaths, cleanup } = loadServicesWithStorage({
     'screen-shot-translation-settings': {
       translationMode: 'auto',
@@ -241,14 +366,63 @@ test('openSaveDirectory prefers revealing the persisted save directory in the fi
     },
   })
 
-  assert.equal(await services.openSaveDirectory(), true)
-  assert.deepEqual(revealedPaths, ['/tmp/export'])
+  const electronCalls = []
+
+  assert.equal(
+    await services.openSaveDirectory({
+      electron: {
+        shell: {
+          openPath: async (fullPath) => {
+            electronCalls.push(fullPath)
+            return ''
+          },
+        },
+      },
+    }),
+    true,
+  )
+
+  assert.deepEqual(electronCalls, ['/tmp/export'])
+  assert.deepEqual(openedPaths, [])
+  assert.deepEqual(revealedPaths, [])
+
+  cleanup()
+})
+
+test('openSaveDirectory falls back to electron shell showItemInFolder when openPath reports an error', async () => {
+  const { services, openedPaths, revealedPaths, cleanup } = loadServicesWithStorage({
+    'screen-shot-translation-settings': {
+      translationMode: 'auto',
+      saveTranslatedImage: true,
+      saveDirectory: ' /tmp/export ',
+      confirmBeforeDelete: true,
+    },
+  })
+
+  const electronCalls = []
+
+  assert.equal(
+    await services.openSaveDirectory({
+      electron: {
+        shell: {
+          openPath: async () => 'failed',
+          showItemInFolder: (fullPath) => {
+            electronCalls.push(fullPath)
+          },
+        },
+      },
+    }),
+    true,
+  )
+
+  assert.deepEqual(electronCalls, ['/tmp/export'])
+  assert.deepEqual(revealedPaths, [])
   assert.deepEqual(openedPaths, [])
 
   cleanup()
 })
 
-test('openSaveDirectory falls back to shellOpenPath when reveal api is unavailable', async () => {
+test('openSaveDirectory falls back to utools shellOpenPath when electron shell is unavailable', async () => {
   const { services, openedPaths, revealedPaths, cleanup } = loadServicesWithStorage(
     {
       'screen-shot-translation-settings': {
@@ -265,7 +439,7 @@ test('openSaveDirectory falls back to shellOpenPath when reveal api is unavailab
 
   delete global.window.utools.shellShowItemInFolder
 
-  assert.equal(await services.openSaveDirectory(), true)
+  assert.equal(await services.openSaveDirectory({ electron: null }), true)
   assert.deepEqual(revealedPaths, [])
   assert.deepEqual(openedPaths, ['/tmp/export'])
 
@@ -285,6 +459,25 @@ test('openSaveDirectory returns false when save directory is empty', async () =>
   assert.equal(await services.openSaveDirectory(), false)
   assert.deepEqual(openedPaths, [])
   assert.deepEqual(revealedPaths, [])
+
+  cleanup()
+})
+
+test('openSaveDirectory shows a notification when every open strategy is unavailable', async () => {
+  const { services, notifications, cleanup } = loadServicesWithStorage({
+    'screen-shot-translation-settings': {
+      translationMode: 'auto',
+      saveTranslatedImage: true,
+      saveDirectory: '/tmp/export',
+      confirmBeforeDelete: true,
+    },
+  })
+
+  delete global.window.utools.shellOpenPath
+  delete global.window.utools.shellShowItemInFolder
+
+  assert.equal(await services.openSaveDirectory({ electron: null }), false)
+  assert.deepEqual(notifications, ['打开保存目录失败，请检查目录路径是否有效。'])
 
   cleanup()
 })
@@ -491,14 +684,14 @@ test('getTranslationCredentials reads the synced baidu credentials document', ()
         _id: 'screen-shot-translation/translation-credentials',
         _rev: '1-rev',
         appId: ' sync-app-id ',
-        appKey: ' sync-app-key ',
+        accessToken: ' sync-access-token ',
       },
     },
   )
 
   assert.deepEqual(services.getTranslationCredentials(), {
     appId: 'sync-app-id',
-    appKey: 'sync-app-key',
+    accessToken: 'sync-access-token',
   })
 
   cleanup()
@@ -512,24 +705,24 @@ test('saveTranslationCredentials merges and persists the synced baidu credential
         _id: 'screen-shot-translation/translation-credentials',
         _rev: '1-rev',
         appId: 'existing-app-id',
-        appKey: '',
+        accessToken: '',
       },
     },
   )
 
   const result = services.saveTranslationCredentials({
-    appKey: ' sync-app-key ',
+    accessToken: ' sync-access-token ',
   })
 
   assert.deepEqual(result, {
     appId: 'existing-app-id',
-    appKey: 'sync-app-key',
+    accessToken: 'sync-access-token',
   })
   assert.deepEqual(getCredentialDoc(), {
     _id: 'screen-shot-translation/translation-credentials',
     _rev: '2-rev',
     appId: 'existing-app-id',
-    appKey: 'sync-app-key',
+    accessToken: 'sync-access-token',
     updatedAt: getCredentialDoc().updatedAt,
   })
 
@@ -593,7 +786,57 @@ test('repinSavedRecord keeps already pinned requests on the happy path', async (
   cleanup()
 })
 
-test('runCaptureTranslationPin starts the workflow after the custom capture bridge returns an image', async () => {
+test('repinSavedRecord loads the saved png as a data url before handing it to the pin window', async () => {
+  const fs = require('fs')
+  const originalReadFile = fs.promises.readFile
+  let receivedImageSrc = ''
+  const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46])
+
+  fs.promises.readFile = async (filePath) => {
+    assert.equal(filePath, path.resolve('/tmp/save', 'translated.png'))
+    return jpegBuffer
+  }
+
+  const { services, cleanup } = loadServicesWithStorage(
+    {
+      'screen-shot-translation-settings': {
+        translationMode: 'auto',
+        saveTranslatedImage: true,
+        saveDirectory: '/tmp/save',
+        confirmBeforeDelete: true,
+      },
+    },
+    {
+      recordStoreModule: {
+        getSavedRecord: async () => ({
+          id: 'record-1',
+          imageFilename: 'translated.png',
+          lastPinBounds: { x: 10, y: 20, width: 120, height: 90 },
+        }),
+        listSavedRecords: async () => ({ records: [] }),
+        deleteSavedRecord: async () => ({ records: [] }),
+        saveTranslatedRecord: async () => null,
+        updateSavedRecordPinState: async () => null,
+      },
+      pinWindowManagerModule: {
+        repinSavedRecordImage: async ({ imageSrc }) => {
+          receivedImageSrc = imageSrc
+          return { ok: true, code: 'already-pinned' }
+        },
+      },
+    },
+  )
+
+  await services.repinSavedRecord('record-1')
+
+  assert.equal(receivedImageSrc, `data:image/jpeg;base64,${jpegBuffer.toString('base64')}`)
+
+  cleanup()
+  fs.promises.readFile = originalReadFile
+})
+
+test('runCaptureTranslationPin starts the workflow after the official screenCapture bridge returns an image', async () => {
+  let screenCaptureCalls = 0
   const { services, cleanup } = loadServicesWithStorage(
     {
       'screen-shot-translation-settings': {
@@ -604,30 +847,51 @@ test('runCaptureTranslationPin starts the workflow after the custom capture brid
       },
     },
     {
+      screenCapture: (callback) => {
+        screenCaptureCalls += 1
+        callback('data:image/png;base64,abc123')
+      },
       customCaptureModule: {
-        captureImageWithCustomOverlay: async () => ({
-          ok: true,
-          image: 'data:image/png;base64,abc123',
-          bounds: { x: 12, y: 24, width: 180, height: 96 },
-        }),
+        captureImageWithCustomOverlay: async () => {
+          throw new Error('custom capture should not be used by runCaptureTranslationPin')
+        },
+      },
+      baiduPictureTranslateModule: {
+        translateCapturedImage: async ({ captureResult, settings, credentials }) => {
+          assert.equal(captureResult.image, 'data:image/png;base64,abc123')
+          assert.equal(settings.translationMode, 'auto')
+          assert.equal(credentials.appId, '')
+          return {
+            ok: true,
+            translatedImageDataUrl: 'data:image/png;base64,translated',
+          }
+        },
+        getLastTranslationDebug: () => null,
       },
       pinWindowManagerModule: {
-        pinTranslatedImage: async () => ({ ok: false, code: 'pin-failed' }),
+        pinTranslatedImage: async () => ({
+          ok: true,
+          code: 'success',
+          windowId: 99,
+          bounds: { x: 100, y: 24, width: 240, height: 120 },
+        }),
       },
     },
   )
 
   const result = await services.runCaptureTranslationPin()
 
+  assert.equal(screenCaptureCalls, 1)
   assert.deepEqual(result, {
-    ok: false,
-    code: 'translation-config-invalid',
+    ok: true,
+    code: 'success',
   })
 
   cleanup()
 })
 
-test('runCaptureTranslationPin keeps capture-cancelled when the custom capture bridge is cancelled', async () => {
+test('runCaptureTranslationPin keeps capture-cancelled when the official screenCapture bridge is cancelled', async () => {
+  let screenCaptureCalls = 0
   const { services, cleanup } = loadServicesWithStorage(
     {
       'screen-shot-translation-settings': {
@@ -638,17 +902,21 @@ test('runCaptureTranslationPin keeps capture-cancelled when the custom capture b
       },
     },
     {
+      screenCapture: (callback) => {
+        screenCaptureCalls += 1
+        callback('')
+      },
       customCaptureModule: {
-        captureImageWithCustomOverlay: async () => ({
-          ok: false,
-          code: 'capture-cancelled',
-        }),
+        captureImageWithCustomOverlay: async () => {
+          throw new Error('custom capture should not be used by runCaptureTranslationPin')
+        },
       },
     },
   )
 
   const result = await services.runCaptureTranslationPin()
 
+  assert.equal(screenCaptureCalls, 1)
   assert.deepEqual(result, {
     ok: false,
     code: 'capture-cancelled',
