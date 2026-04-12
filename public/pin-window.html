@@ -16,9 +16,150 @@
       }
 
       #root {
+        --pin-shadow-gap: 6px;
+        position: relative;
         width: 100%;
         height: 100%;
+        padding: var(--pin-shadow-gap);
+        box-sizing: border-box;
         cursor: move;
+        background: transparent;
+      }
+
+      #root.pin-attention {
+        animation: pin-attention 780ms cubic-bezier(0.36, 0.07, 0.19, 0.97) 1;
+      }
+
+      #root.pin-copied::after {
+        animation: pin-copied-border 720ms ease-out 1;
+      }
+
+      @keyframes pin-attention {
+        0%,
+        100% {
+          transform: translateX(0);
+        }
+
+        10% {
+          transform: translateX(-8px);
+        }
+
+        20% {
+          transform: translateX(8px);
+        }
+
+        30% {
+          transform: translateX(-7px);
+        }
+
+        40% {
+          transform: translateX(7px);
+        }
+
+        50% {
+          transform: translateX(-6px);
+        }
+
+        60% {
+          transform: translateX(6px);
+        }
+
+        70% {
+          transform: translateX(-4px);
+        }
+
+        80% {
+          transform: translateX(4px);
+        }
+      }
+
+      @keyframes pin-copied-border {
+        0% {
+          border-color: rgba(123, 200, 255, 0.52);
+          box-shadow: 0 0 0 rgba(123, 200, 255, 0);
+        }
+
+        24% {
+          border-color: rgba(168, 222, 255, 0.96);
+          box-shadow: 0 0 0 2px rgba(168, 222, 255, 0.22);
+        }
+
+        100% {
+          border-color: rgba(123, 200, 255, 0.52);
+          box-shadow: 0 0 0 rgba(123, 200, 255, 0);
+        }
+      }
+
+      @keyframes pin-copied-text {
+        0%,
+        100% {
+          transform: translateX(0);
+        }
+
+        14% {
+          transform: translateX(-6px);
+        }
+
+        28% {
+          transform: translateX(6px);
+        }
+
+        42% {
+          transform: translateX(-5px);
+        }
+
+        56% {
+          transform: translateX(5px);
+        }
+
+        70% {
+          transform: translateX(-3px);
+        }
+
+        84% {
+          transform: translateX(3px);
+        }
+      }
+
+      #root::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: 10px;
+        border: 6px solid rgba(123, 200, 255, 0.52);
+        box-sizing: border-box;
+        pointer-events: none;
+      }
+
+      #frame {
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        border-radius: 8px;
+      }
+
+      #copy-feedback {
+        position: absolute;
+        top: 14px;
+        right: 14px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(11, 18, 24, 0.86);
+        color: rgba(228, 247, 255, 0.96);
+        font: 600 12px/1 "Space Grotesk", "Doto", sans-serif;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        opacity: 0;
+        transform: translateX(0);
+        transition: opacity 120ms ease;
+        pointer-events: none;
+        z-index: 2;
+      }
+
+      #root.pin-copied #copy-feedback {
+        opacity: 1;
+        animation: pin-copied-text 720ms cubic-bezier(0.36, 0.07, 0.19, 0.97) 1;
       }
 
       #image {
@@ -31,14 +172,218 @@
     </style>
   </head>
   <body>
-    <div id="root">
-      <img id="image" alt="" draggable="false" />
+    <div id="root" tabindex="0">
+      <div id="copy-feedback">已复制</div>
+      <div id="frame">
+        <img id="image" alt="" draggable="false" />
+      </div>
     </div>
     <script>
       const root = document.getElementById('root')
+      const frameElement = document.getElementById('frame')
+      const copyFeedbackElement = document.getElementById('copy-feedback')
       const imageElement = document.getElementById('image')
+      const PIN_ATTENTION_CLASS = 'pin-attention'
+      const PIN_ATTENTION_DURATION_MS = 780
+      const PIN_COPIED_CLASS = 'pin-copied'
+      const PIN_COPIED_DURATION_MS = 720
+      const WHEEL_ZOOM_END_DELAY_MS = 80
+      const WHEEL_ZOOM_SENSITIVITY = 0.0014
+      const MAX_LIVE_ZOOM_IN_STEP = 1.05
+      const MIN_LIVE_ZOOM_OUT_STEP = 0.95
+      const MAX_LIVE_ZOOM_LOG_STEP = 0.032
+      const MIN_LIVE_ZOOM_LOG_STEP = 0.0045
+      const ZOOM_SMOOTHING_RATIO = 0.72
+      const WHEEL_LINE_HEIGHT_PX = 16
       let pinChannel = ''
       let dragging = false
+      let attentionTimer = 0
+      let copyFeedbackTimer = 0
+      let wheelZoomEndTimer = 0
+      let zoomRafId = 0
+      let pendingZoomLogDelta = 0
+      let pendingZoomAnchor = { anchorRatioX: 0.5, anchorRatioY: 0.5 }
+      let zoomEndRequested = false
+      let gestureActive = false
+      let lastGestureScale = 1
+      let clipboardImageSource = ''
+      let lastClipboardWriteAt = 0
+      let currentImageToken = 0
+      const EDGE_WHITE_THRESHOLD = 234
+      const EDGE_ALPHA_THRESHOLD = 180
+      const EDGE_WHITE_CHROMA_THRESHOLD = 12
+      const CONTENT_ALPHA_THRESHOLD = 24
+      const CONTENT_BOUNDS_PADDING = 1
+
+      function isNearWhitePixel(data, pixelIndex) {
+        const red = Number(data[pixelIndex])
+        const green = Number(data[pixelIndex + 1])
+        const blue = Number(data[pixelIndex + 2])
+        const alpha = Number(data[pixelIndex + 3])
+        const brightness = (red + green + blue) / 3
+        const chroma = Math.max(red, green, blue) - Math.min(red, green, blue)
+
+        return (
+          alpha >= EDGE_ALPHA_THRESHOLD &&
+          brightness >= EDGE_WHITE_THRESHOLD &&
+          chroma <= EDGE_WHITE_CHROMA_THRESHOLD
+        )
+      }
+
+      function getPixelIndex(x, y, width) {
+        return (y * width + x) * 4
+      }
+
+      function removeEdgeNearWhitePixels({ data, width, height }) {
+        if (!data || !Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+          return data
+        }
+
+        const nextData = Uint8ClampedArray.from(data)
+        const visited = new Uint8Array(width * height)
+        const queue = []
+
+        function enqueue(x, y) {
+          if (x < 0 || y < 0 || x >= width || y >= height) {
+            return
+          }
+
+          const flatIndex = y * width + x
+          if (visited[flatIndex]) {
+            return
+          }
+
+          const pixelIndex = getPixelIndex(x, y, width)
+          if (!isNearWhitePixel(nextData, pixelIndex)) {
+            return
+          }
+
+          visited[flatIndex] = 1
+          queue.push([x, y])
+        }
+
+        for (let x = 0; x < width; x += 1) {
+          enqueue(x, 0)
+          enqueue(x, height - 1)
+        }
+
+        for (let y = 1; y < height - 1; y += 1) {
+          enqueue(0, y)
+          enqueue(width - 1, y)
+        }
+
+        while (queue.length > 0) {
+          const [x, y] = queue.shift()
+          const pixelIndex = getPixelIndex(x, y, width)
+
+          nextData[pixelIndex + 3] = 0
+
+          enqueue(x - 1, y)
+          enqueue(x + 1, y)
+          enqueue(x, y - 1)
+          enqueue(x, y + 1)
+        }
+
+        return nextData
+      }
+
+      function isVisibleContentPixel(data, pixelIndex) {
+        return Number(data[pixelIndex + 3]) >= CONTENT_ALPHA_THRESHOLD
+      }
+
+      function clampBoundsWithPadding(bounds, width, height) {
+        return {
+          x: Math.max(0, bounds.x - CONTENT_BOUNDS_PADDING),
+          y: Math.max(0, bounds.y - CONTENT_BOUNDS_PADDING),
+          width:
+            Math.min(width - 1, bounds.x + bounds.width - 1 + CONTENT_BOUNDS_PADDING) -
+              Math.max(0, bounds.x - CONTENT_BOUNDS_PADDING) +
+            1,
+          height:
+            Math.min(height - 1, bounds.y + bounds.height - 1 + CONTENT_BOUNDS_PADDING) -
+              Math.max(0, bounds.y - CONTENT_BOUNDS_PADDING) +
+            1,
+        }
+      }
+
+      function findVisibleContentBounds({ data, width, height }) {
+        if (!data || !Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+          return null
+        }
+
+        let minX = width
+        let minY = height
+        let maxX = -1
+        let maxY = -1
+
+        for (let y = 0; y < height; y += 1) {
+          for (let x = 0; x < width; x += 1) {
+            const pixelIndex = getPixelIndex(x, y, width)
+            if (!isVisibleContentPixel(data, pixelIndex)) {
+              continue
+            }
+
+            if (x < minX) {
+              minX = x
+            }
+            if (x > maxX) {
+              maxX = x
+            }
+            if (y < minY) {
+              minY = y
+            }
+            if (y > maxY) {
+              maxY = y
+            }
+          }
+        }
+
+        if (minX < 0 || minY < 0 || maxX < minX || maxY < minY) {
+          return null
+        }
+
+        return clampBoundsWithPadding(
+          {
+            x: minX,
+            y: minY,
+            width: maxX - minX + 1,
+            height: maxY - minY + 1,
+          },
+          width,
+          height,
+        )
+      }
+
+      function scaleContentBoundsToTarget({ sourceWidth, sourceHeight, targetWidth, targetHeight, bounds }) {
+        const normalizedBounds = bounds && typeof bounds === 'object'
+          ? {
+              x: Math.round(Number(bounds.x)),
+              y: Math.round(Number(bounds.y)),
+              width: Math.round(Number(bounds.width)),
+              height: Math.round(Number(bounds.height)),
+            }
+          : null
+
+        if (
+          !normalizedBounds ||
+          ![sourceWidth, sourceHeight, targetWidth, targetHeight].every(Number.isFinite) ||
+          sourceWidth <= 0 ||
+          sourceHeight <= 0 ||
+          targetWidth <= 0 ||
+          targetHeight <= 0 ||
+          normalizedBounds.width <= 0 ||
+          normalizedBounds.height <= 0
+        ) {
+          return null
+        }
+
+        return {
+          x: Math.round((normalizedBounds.x * targetWidth) / sourceWidth),
+          y: Math.round((normalizedBounds.y * targetHeight) / sourceHeight),
+          width: Math.max(1, Math.round((normalizedBounds.width * targetWidth) / sourceWidth)),
+          height: Math.max(1, Math.round((normalizedBounds.height * targetHeight) / sourceHeight)),
+        }
+      }
 
       function sendToParent(payload) {
         if (!pinChannel || !window.utools || typeof window.utools.sendToParent !== 'function') {
@@ -48,11 +393,246 @@
         window.utools.sendToParent(pinChannel, payload)
       }
 
+      function clampRatio(value) {
+        if (!Number.isFinite(value)) {
+          return 0.5
+        }
+
+        return Math.min(Math.max(value, 0), 1)
+      }
+
+      function clampLiveScaleFactor(scaleFactor) {
+        if (!Number.isFinite(scaleFactor) || scaleFactor <= 0) {
+          return 1
+        }
+
+        return Math.min(Math.max(scaleFactor, MIN_LIVE_ZOOM_OUT_STEP), MAX_LIVE_ZOOM_IN_STEP)
+      }
+
+      function normalizeWheelDelta(event) {
+        if (event.deltaMode === 1) {
+          return event.deltaY * WHEEL_LINE_HEIGHT_PX
+        }
+
+        if (event.deltaMode === 2) {
+          return event.deltaY * Math.max(1, frameElement?.clientHeight || window.innerHeight || 1)
+        }
+
+        return event.deltaY
+      }
+
+      // 缩放锚点按当前内容框算，保持用户指针下那一点尽量不漂。
+      function getZoomAnchorRatios(clientX, clientY) {
+        const rect = frameElement?.getBoundingClientRect?.()
+
+        if (!rect || rect.width <= 0 || rect.height <= 0) {
+          return { anchorRatioX: 0.5, anchorRatioY: 0.5 }
+        }
+
+        return {
+          anchorRatioX: clampRatio((clientX - rect.left) / rect.width),
+          anchorRatioY: clampRatio((clientY - rect.top) / rect.height),
+        }
+      }
+
+      // 把离散输入累计成目标缩放量，再拆成多帧小步进释放，避免一格滚轮跳太大。
+      function flushZoomFrame() {
+        zoomRafId = 0
+
+        if (Math.abs(pendingZoomLogDelta) < MIN_LIVE_ZOOM_LOG_STEP) {
+          pendingZoomLogDelta = 0
+          if (zoomEndRequested) {
+            zoomEndRequested = false
+            sendToParent({
+              type: 'zoom',
+              phase: 'end',
+            })
+          }
+          return
+        }
+
+        const nextStepLogDelta = Math.sign(pendingZoomLogDelta) *
+          Math.min(
+            MAX_LIVE_ZOOM_LOG_STEP,
+            Math.max(MIN_LIVE_ZOOM_LOG_STEP, Math.abs(pendingZoomLogDelta) * ZOOM_SMOOTHING_RATIO),
+          )
+        pendingZoomLogDelta -= nextStepLogDelta
+
+        sendToParent({
+          type: 'zoom',
+          phase: 'live',
+          ...pendingZoomAnchor,
+          scaleFactor: Math.exp(nextStepLogDelta),
+        })
+
+        zoomRafId = window.requestAnimationFrame(() => {
+          flushZoomFrame()
+        })
+      }
+
+      // 透明 pin window 只有在自身明确拿到焦点后，组合键监听才稳定。
+      function focusPinSurface() {
+        try {
+          root?.focus?.({ preventScroll: true })
+        } catch {
+          root?.focus?.()
+        }
+      }
+
+      function playCopyFeedback() {
+        if (!root || !copyFeedbackElement) {
+          return
+        }
+
+        root.classList.remove(PIN_COPIED_CLASS)
+        void root.offsetWidth
+        root.classList.add(PIN_COPIED_CLASS)
+
+        if (copyFeedbackTimer) {
+          window.clearTimeout(copyFeedbackTimer)
+        }
+
+        copyFeedbackTimer = window.setTimeout(() => {
+          root.classList.remove(PIN_COPIED_CLASS)
+          copyFeedbackTimer = 0
+        }, PIN_COPIED_DURATION_MS + 40)
+      }
+
+      // 复制直接走 uTools 官方剪贴板能力，避免在子窗口里继续依赖 Electron clipboard 的兼容性。
+      function copyPinnedImageToClipboard() {
+        const imageSource = clipboardImageSource || imageElement.currentSrc || imageElement.src
+
+        if (
+          !imageSource ||
+          typeof imageSource !== 'string' ||
+          !window.utools ||
+          typeof window.utools.copyImage !== 'function'
+        ) {
+          return false
+        }
+
+        try {
+          const result = window.utools.copyImage(imageSource)
+          lastClipboardWriteAt = Date.now()
+          if (result === false) {
+            return false
+          }
+          playCopyFeedback()
+          return true
+        } catch {
+          return false
+        }
+      }
+
+      function shouldHandleCopyShortcut(event) {
+        const key = event.key?.toLowerCase?.() || ''
+        return (
+          (key === 'c' || event.code === 'KeyC') &&
+          (event.metaKey || event.ctrlKey) &&
+          !event.altKey
+        )
+      }
+
+      function handleClipboardCopyRequest(event) {
+        if (!copyPinnedImageToClipboard()) {
+          return
+        }
+
+        event.preventDefault()
+        event.stopPropagation()
+      }
+
+      // ESC 只在当前 pin window 已经拿到焦点时生效，复用现有 close 消息，不再单独扩一条父子协议。
+      function shouldHandleEscapeClose(event) {
+        return event.key === 'Escape' && !event.metaKey && !event.ctrlKey && !event.altKey
+      }
+
+      function handlePinCloseRequest(event) {
+        event.preventDefault()
+        event.stopPropagation()
+        sendToParent({ type: 'close' })
+      }
+
+      function queueZoomFrame(scaleFactor, clientX, clientY) {
+        if (!Number.isFinite(scaleFactor) || scaleFactor <= 0) {
+          return
+        }
+
+        pendingZoomAnchor = getZoomAnchorRatios(clientX, clientY)
+        pendingZoomLogDelta += Math.log(clampLiveScaleFactor(scaleFactor))
+        zoomEndRequested = false
+
+        if (!zoomRafId) {
+          zoomRafId = window.requestAnimationFrame(() => {
+            flushZoomFrame()
+          })
+        }
+      }
+
+      // 清掉上一段滚轮留下的尾巴，让新的交互能直接接管当前缩放状态。
+      function cancelQueuedZoom() {
+        if (wheelZoomEndTimer) {
+          window.clearTimeout(wheelZoomEndTimer)
+          wheelZoomEndTimer = 0
+        }
+
+        if (zoomRafId) {
+          window.cancelAnimationFrame(zoomRafId)
+          zoomRafId = 0
+        }
+
+        pendingZoomLogDelta = 0
+        zoomEndRequested = false
+      }
+
+      // 双指缩放事件本身已经足够连续，这里直接发 live zoom，避免再叠一层惯性。
+      function dispatchImmediateZoomFrame(scaleFactor, clientX, clientY) {
+        if (!Number.isFinite(scaleFactor) || scaleFactor <= 0) {
+          return
+        }
+
+        sendToParent({
+          type: 'zoom',
+          phase: 'live',
+          ...getZoomAnchorRatios(clientX, clientY),
+          scaleFactor: clampLiveScaleFactor(scaleFactor),
+        })
+      }
+
+      function sendZoomEnd() {
+        if (wheelZoomEndTimer) {
+          window.clearTimeout(wheelZoomEndTimer)
+          wheelZoomEndTimer = 0
+        }
+
+        if (Math.abs(pendingZoomLogDelta) < MIN_LIVE_ZOOM_LOG_STEP && !zoomRafId) {
+          sendToParent({
+            type: 'zoom',
+            phase: 'end',
+          })
+          return
+        }
+
+        zoomEndRequested = true
+      }
+
+      function scheduleWheelZoomEnd() {
+        if (wheelZoomEndTimer) {
+          window.clearTimeout(wheelZoomEndTimer)
+        }
+
+        wheelZoomEndTimer = window.setTimeout(() => {
+          wheelZoomEndTimer = 0
+          sendZoomEnd()
+        }, WHEEL_ZOOM_END_DELAY_MS)
+      }
+
       root.addEventListener('mousedown', (event) => {
         if (event.button !== 0) {
           return
         }
 
+        focusPinSurface()
         dragging = true
         sendToParent({
           type: 'drag-start',
@@ -90,9 +670,276 @@
         sendToParent({ type: 'close' })
       })
 
-      window.__SCREEN_TRANSLATION_PIN_INIT__ = function initPinWindow(payload) {
+      window.addEventListener('keydown', (event) => {
+        if (shouldHandleEscapeClose(event)) {
+          handlePinCloseRequest(event)
+          return
+        }
+
+        if (!shouldHandleCopyShortcut(event)) {
+          return
+        }
+
+        handleClipboardCopyRequest(event)
+      })
+
+      // 某些环境里组合键会直接触发 copy 语义事件，这里也接住，避免只依赖 keydown。
+      window.addEventListener('copy', (event) => {
+        if (Date.now() - lastClipboardWriteAt < 80) {
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
+
+        handleClipboardCopyRequest(event)
+      })
+
+      root.addEventListener(
+        'wheel',
+        (event) => {
+          if (gestureActive) {
+            return
+          }
+
+          event.preventDefault()
+          queueZoomFrame(
+            clampLiveScaleFactor(Math.exp(-normalizeWheelDelta(event) * WHEEL_ZOOM_SENSITIVITY)),
+            event.clientX,
+            event.clientY,
+          )
+          scheduleWheelZoomEnd()
+        },
+        { passive: false },
+      )
+
+      window.addEventListener('gesturestart', (event) => {
+        event.preventDefault()
+        cancelQueuedZoom()
+        gestureActive = true
+        lastGestureScale =
+          Number.isFinite(event.scale) && event.scale > 0 ? event.scale : 1
+      })
+
+      window.addEventListener('gesturechange', (event) => {
+        if (!gestureActive) {
+          return
+        }
+
+        event.preventDefault()
+        const nextGestureScale =
+          Number.isFinite(event.scale) && event.scale > 0 ? event.scale : 1
+        dispatchImmediateZoomFrame(
+          clampLiveScaleFactor(nextGestureScale / lastGestureScale),
+          event.clientX,
+          event.clientY,
+        )
+        lastGestureScale = nextGestureScale
+      })
+
+      window.addEventListener('gestureend', (event) => {
+        if (!gestureActive) {
+          return
+        }
+
+        event.preventDefault()
+        gestureActive = false
+        lastGestureScale = 1
+        sendZoomEnd()
+      })
+
+      function playPinAttention() {
+        if (!root) {
+          return
+        }
+
+        root.classList.remove(PIN_ATTENTION_CLASS)
+        void root.offsetWidth
+        root.classList.add(PIN_ATTENTION_CLASS)
+
+        if (attentionTimer) {
+          window.clearTimeout(attentionTimer)
+        }
+
+        attentionTimer = window.setTimeout(() => {
+          root.classList.remove(PIN_ATTENTION_CLASS)
+          attentionTimer = 0
+        }, PIN_ATTENTION_DURATION_MS + 40)
+      }
+
+      // 首帧先把原图解码成功，再让 pin window 露出来，避免用户先看到白壳。
+      function waitForImageReady(source) {
+        if (!source) {
+          imageElement.removeAttribute('src')
+          return Promise.resolve(false)
+        }
+
+        return new Promise((resolve) => {
+          let settled = false
+
+          function finish(ok) {
+            if (settled) {
+              return
+            }
+
+            settled = true
+            imageElement.removeEventListener('load', handleLoad)
+            imageElement.removeEventListener('error', handleError)
+            resolve(ok)
+          }
+
+          function handleLoad() {
+            finish(true)
+          }
+
+          function handleError() {
+            finish(false)
+          }
+
+          imageElement.addEventListener('load', handleLoad, { once: true })
+          imageElement.addEventListener('error', handleError, { once: true })
+          imageElement.src = source
+
+          if (imageElement.complete && imageElement.naturalWidth > 0) {
+            finish(true)
+          }
+        })
+      }
+
+      function createProcessedImageDataUrl(source) {
+        if (!source || typeof removeEdgeNearWhitePixels !== 'function') {
+          return Promise.resolve('')
+        }
+
+        return new Promise((resolve) => {
+          const probe = new Image()
+          probe.onload = () => {
+            try {
+              const width = Math.max(1, probe.naturalWidth || probe.width || 0)
+              const height = Math.max(1, probe.naturalHeight || probe.height || 0)
+              const canvas = document.createElement('canvas')
+              canvas.width = width
+              canvas.height = height
+              const context = canvas.getContext('2d', { willReadFrequently: true })
+
+              if (!context) {
+                resolve('')
+                return
+              }
+
+              context.drawImage(probe, 0, 0)
+              const imageData = context.getImageData(0, 0, width, height)
+              imageData.data.set(
+                removeEdgeNearWhitePixels({
+                  data: imageData.data,
+                  width,
+                  height,
+                }),
+              )
+              context.putImageData(imageData, 0, 0)
+              const contentBounds =
+                typeof findVisibleContentBounds === 'function'
+                  ? findVisibleContentBounds({
+                      data: imageData.data,
+                      width,
+                      height,
+                    })
+                  : null
+
+              if (
+                contentBounds &&
+                contentBounds.width > 0 &&
+                contentBounds.height > 0 &&
+                (contentBounds.width < width || contentBounds.height < height)
+              ) {
+                const frameRect = frameElement?.getBoundingClientRect?.()
+                const projectedBounds =
+                  typeof scaleContentBoundsToTarget === 'function'
+                    ? scaleContentBoundsToTarget({
+                        sourceWidth: width,
+                        sourceHeight: height,
+                        targetWidth: frameRect?.width || 0,
+                        targetHeight: frameRect?.height || 0,
+                        bounds: contentBounds,
+                      })
+                    : null
+                const cropCanvas = document.createElement('canvas')
+                cropCanvas.width = contentBounds.width
+                cropCanvas.height = contentBounds.height
+                const cropContext = cropCanvas.getContext('2d')
+
+                if (!cropContext) {
+                  resolve(canvas.toDataURL('image/png'))
+                  return
+                }
+
+                cropContext.drawImage(
+                  canvas,
+                  contentBounds.x,
+                  contentBounds.y,
+                  contentBounds.width,
+                  contentBounds.height,
+                  0,
+                  0,
+                  contentBounds.width,
+                  contentBounds.height,
+                )
+                sendToParent({
+                  type: 'content-bounds',
+                  x: projectedBounds?.x ?? contentBounds.x,
+                  y: projectedBounds?.y ?? contentBounds.y,
+                  width: projectedBounds?.width ?? contentBounds.width,
+                  height: projectedBounds?.height ?? contentBounds.height,
+                })
+                resolve(cropCanvas.toDataURL('image/png'))
+                return
+              }
+
+              resolve(canvas.toDataURL('image/png'))
+            } catch {
+              resolve('')
+            }
+          }
+
+          probe.onerror = () => resolve('')
+          probe.src = source
+        })
+      }
+
+      window.__SCREEN_TRANSLATION_PIN_INIT__ = async function initPinWindow(payload) {
         pinChannel = payload && typeof payload.channel === 'string' ? payload.channel : ''
-        imageElement.src = payload && typeof payload.imageSrc === 'string' ? payload.imageSrc : ''
+        root.style.setProperty(
+          '--pin-shadow-gap',
+          typeof payload?.frameInset === 'number' ? `${payload.frameInset}px` : '6px',
+        )
+        focusPinSurface()
+        const sourceImage = payload && typeof payload.imageSrc === 'string' ? payload.imageSrc : ''
+        currentImageToken += 1
+        const imageToken = currentImageToken
+
+        clipboardImageSource = sourceImage
+        const imageReady = await waitForImageReady(sourceImage)
+        if (!imageReady || imageToken !== currentImageToken) {
+          return
+        }
+
+        // 后处理改成后台异步执行：窗口先显示原图，再按需要裁掉浅色边缘和空白。
+        void createProcessedImageDataUrl(sourceImage).then((processedImage) => {
+          if (!processedImage || imageToken !== currentImageToken || processedImage === sourceImage) {
+            return
+          }
+
+          clipboardImageSource = processedImage
+          imageElement.src = processedImage
+        })
+      }
+
+      window.__SCREEN_TRANSLATION_PIN_ATTENTION__ = function triggerPinAttention() {
+        playPinAttention()
+      }
+
+      // 父窗口复制图片时，从这里拿到当前真正显示的位图来源，避免主进程继续猜图片状态。
+      window.__SCREEN_TRANSLATION_PIN_CLIPBOARD_IMAGE__ = function getClipboardImageSource() {
+        return clipboardImageSource || imageElement.currentSrc || imageElement.src || ''
       }
     </script>
   </body>

@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url)
 const {
   removeEdgeNearWhitePixels,
   findVisibleContentBounds,
+  scaleContentBoundsToTarget,
 } = require('../../public/preload/pinImageMask.cjs')
 
 function createImageData(width, height, fillPixel) {
@@ -118,5 +119,27 @@ test('findVisibleContentBounds keeps a tight padded box around thin content afte
     y: 1,
     width: 3,
     height: 6,
+  })
+})
+
+test('scaleContentBoundsToTarget converts natural image bounds into the current rendered content bounds', () => {
+  const scaled = scaleContentBoundsToTarget({
+    sourceWidth: 400,
+    sourceHeight: 200,
+    targetWidth: 200,
+    targetHeight: 100,
+    bounds: {
+      x: 20,
+      y: 40,
+      width: 300,
+      height: 100,
+    },
+  })
+
+  assert.deepEqual(scaled, {
+    x: 10,
+    y: 20,
+    width: 150,
+    height: 50,
   })
 })

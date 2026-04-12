@@ -7,7 +7,7 @@ const DEFAULT_PLUGIN_SETTINGS = {
 }
 const DEFAULT_TRANSLATION_CREDENTIALS = {
   appId: '',
-  appKey: '',
+  accessToken: '',
 }
 
 // 前端和 preload 共用同一套插件设置骨架，任何脏值都只允许回落到默认字段。
@@ -48,15 +48,24 @@ export function normalizeTranslationCredentials(raw) {
 
   return {
     appId: typeof candidate.appId === 'string' ? candidate.appId.trim() : DEFAULT_TRANSLATION_CREDENTIALS.appId,
-    appKey: typeof candidate.appKey === 'string' ? candidate.appKey.trim() : DEFAULT_TRANSLATION_CREDENTIALS.appKey,
+    accessToken:
+      typeof candidate.accessToken === 'string'
+        ? candidate.accessToken.trim()
+        : DEFAULT_TRANSLATION_CREDENTIALS.accessToken,
   }
 }
 
-// 凭证只要有一项缺失，就在设置页显式提醒用户不要以为已经可用。
+// 图片翻译当前只保留 V2 接入方式，警告语义也统一围绕 AppID + Access Token。
 export function getTranslationCredentialWarning(credentials) {
   const normalized = normalizeTranslationCredentials(credentials)
-  if ((normalized.appId && !normalized.appKey) || (!normalized.appId && normalized.appKey)) {
-    return '百度图片翻译凭证尚未填写完整，请同时提供 AppID 和 AppKey。'
+  const hasCompleteCredential = normalized.appId && normalized.accessToken
+
+  if (hasCompleteCredential) {
+    return ''
+  }
+
+  if (normalized.appId || normalized.accessToken) {
+    return '百度图片翻译 V2 凭证尚未填写完整，请同时提供 AppID 和 Access Token。'
   }
 
   return ''

@@ -23,6 +23,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'back'): void
+  (event: 'open-resource-link', url: string): void
   (event: 'pick-save-directory'): void
   (event: 'open-save-directory'): void
   (event: 'save-plugin-settings', payload: Partial<PluginSettings>): void
@@ -90,10 +91,38 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
         <div class="settings-card__header">
           <div>
             <p class="group-title">翻译凭证</p>
-            <p class="group-copy">填写百度图片翻译凭证，凭证会保存到 uTools 同步数据库，并随同一账号同步。</p>
+            <p class="group-copy">当前只使用百度图片翻译 V2，请同时填写 AppID 和 Access Token。</p>
+            <div class="resource-links" aria-label="百度图片翻译相关链接">
+              <a
+                class="resource-link"
+                href="https://fanyi-api.baidu.com/product/233"
+                target="_blank"
+                rel="noreferrer"
+                @click.prevent="emit('open-resource-link', 'https://fanyi-api.baidu.com/product/233')"
+              >
+                图片翻译 V2.0 文档
+              </a>
+              <a
+                class="resource-link"
+                href="https://fanyi-api.baidu.com/"
+                target="_blank"
+                rel="noreferrer"
+                @click.prevent="emit('open-resource-link', 'https://fanyi-api.baidu.com/')"
+              >
+                申请百度翻译开放平台
+              </a>
+            </div>
           </div>
-          <span class="status-chip">
-            {{ props.translationCredentials.appId && props.translationCredentials.appKey ? '已配置' : '未配置' }}
+        </div>
+
+        <div class="info-strip">
+          <span class="info-strip__label">当前状态</span>
+          <span class="info-strip__value">
+            {{
+              props.translationCredentials.appId && props.translationCredentials.accessToken
+                ? 'V2 已启用'
+                : '未配置'
+            }}
           </span>
         </div>
 
@@ -103,19 +132,19 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
             class="field__control"
             type="text"
             :value="props.translationCredentials.appId"
-            placeholder="请输入百度图片翻译 AppID"
+            placeholder="V2 需要 AppID"
             @input="emitTranslationCredentialChange({ appId: ($event.target as HTMLInputElement).value })"
           />
         </label>
 
         <label class="field">
-          <span class="field__label">百度 AppKey</span>
+          <span class="field__label">百度 Access Token</span>
           <input
             class="field__control"
             type="password"
-            :value="props.translationCredentials.appKey"
-            placeholder="请输入百度图片翻译 AppKey"
-            @input="emitTranslationCredentialChange({ appKey: ($event.target as HTMLInputElement).value })"
+            :value="props.translationCredentials.accessToken"
+            placeholder="需要与 AppID 配合使用"
+            @input="emitTranslationCredentialChange({ accessToken: ($event.target as HTMLInputElement).value })"
           />
         </label>
 
@@ -130,7 +159,11 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
             <p class="group-title">翻译方向</p>
             <p class="group-copy">控制当前截图结果的翻译方向。</p>
           </div>
-          <span class="status-chip">
+        </div>
+
+        <div class="info-strip">
+          <span class="info-strip__label">当前方向</span>
+          <span class="info-strip__value">
             {{
               TRANSLATION_MODE_OPTIONS.find((option) => option.value === pluginSettings.translationMode)?.label ??
               pluginSettings.translationMode
@@ -158,7 +191,11 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
             <p class="group-title">结果保存</p>
             <p class="group-copy">保存开关和目录一起组成有效配置，目录可以手动输入，也可以通过系统选择器填写。</p>
           </div>
-          <span class="status-chip">{{ pluginSettings.saveTranslatedImage ? '已开启' : '已关闭' }}</span>
+        </div>
+
+        <div class="info-strip">
+          <span class="info-strip__label">当前状态</span>
+          <span class="info-strip__value">{{ pluginSettings.saveTranslatedImage ? '已开启' : '已关闭' }}</span>
         </div>
 
         <label class="field field--inline">
@@ -206,7 +243,11 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
             <p class="group-title">删除行为</p>
             <p class="group-copy">控制删除记录时是否先弹出确认提示。</p>
           </div>
-          <span class="status-chip">{{ pluginSettings.confirmBeforeDelete ? '需要确认' : '直接删除' }}</span>
+        </div>
+
+        <div class="info-strip">
+          <span class="info-strip__label">当前状态</span>
+          <span class="info-strip__value">{{ pluginSettings.confirmBeforeDelete ? '需要确认' : '直接删除' }}</span>
         </div>
 
         <label class="field field--inline">
@@ -225,7 +266,11 @@ const hasSaveDirectory = computed(() => props.pluginSettings.saveDirectory.trim(
             <p class="group-title">界面偏好</p>
             <p class="group-copy">主题和窗口高度会保存在同一份界面设置里。</p>
           </div>
-          <span class="status-chip">{{ themeStatus }}</span>
+        </div>
+
+        <div class="info-strip">
+          <span class="info-strip__label">当前主题</span>
+          <span class="info-strip__value">{{ themeStatus }}</span>
         </div>
 
         <label class="field">

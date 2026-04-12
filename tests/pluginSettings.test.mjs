@@ -54,29 +54,55 @@ test('normalizeTranslationCredentials trims the synced baidu credentials', () =>
   assert.deepEqual(
     normalizeTranslationCredentials({
       appId: '  app-id  ',
-      appKey: '  app-key  ',
+      accessToken: '  access-token  ',
     }),
     {
       appId: 'app-id',
-      appKey: 'app-key',
+      accessToken: 'access-token',
     },
   )
 })
 
-test('getTranslationCredentialWarning surfaces the half-filled credential state only when needed', () => {
+test('getTranslationCredentialWarning surfaces the V2 half-filled credential state only when needed', () => {
   assert.equal(
     getTranslationCredentialWarning({
       appId: 'app-id',
-      appKey: '',
+      accessToken: '',
     }),
-    '百度图片翻译凭证尚未填写完整，请同时提供 AppID 和 AppKey。',
+    '百度图片翻译 V2 凭证尚未填写完整，请同时提供 AppID 和 Access Token。',
   )
 
   assert.equal(
     getTranslationCredentialWarning({
       appId: 'app-id',
-      appKey: 'app-key',
+      accessToken: 'access-token',
     }),
     '',
+  )
+})
+
+test('getTranslationCredentialWarning only recognizes V2 credentials', () => {
+  assert.equal(
+    getTranslationCredentialWarning({
+      appId: '',
+      accessToken: '',
+    }),
+    '',
+  )
+
+  assert.equal(
+    getTranslationCredentialWarning({
+      appId: '',
+      accessToken: 'access-token',
+    }),
+    '百度图片翻译 V2 凭证尚未填写完整，请同时提供 AppID 和 Access Token。',
+  )
+
+  assert.equal(
+    getTranslationCredentialWarning({
+      appId: 'app-id',
+      accessToken: '',
+    }),
+    '百度图片翻译 V2 凭证尚未填写完整，请同时提供 AppID 和 Access Token。',
   )
 })

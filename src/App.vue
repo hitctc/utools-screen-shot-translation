@@ -28,11 +28,16 @@ import {
 } from './screenTranslation/theme.js'
 import { createUnknownPluginEnterResult } from './screenTranslation/entryFlow.js'
 import { normalizePluginSettings, normalizeTranslationCredentials } from './screenTranslation/pluginSettings.js'
-import { mapSavedRecordToViewRecord, mapWorkflowFailureToResult } from './screenTranslation/viewState.js'
+import {
+  mapSavedRecordToViewRecord,
+  mapWorkflowFailureToResult,
+  splitRecordsIntoVisualColumns,
+} from './screenTranslation/viewState.js'
 
 type WorkflowBridgeResult = {
   ok: boolean
   code: string
+  translationDebug?: Record<string, unknown> | null
 }
 
 type RecordBridgeResult = {
@@ -51,21 +56,28 @@ type SavedRecordManifest = {
 }
 
 type ServicesBridge = {
+  consumePendingPluginEnter?: () => { code?: string } | null
+  consumePendingWorkflowResult?: () => WorkflowBridgeResult | null
   getUiSettings?: () => UiSettings
   saveUiSettings?: (partial: Partial<UiSettings>) => UiSettings
   getPluginSettings?: () => PluginSettings
   savePluginSettings?: (partial: Partial<PluginSettings>) => PluginSettings
   getTranslationCredentials?: () => TranslationCredentials
   saveTranslationCredentials?: (partial: Partial<TranslationCredentials>) => TranslationCredentials
+  getLastTranslationDebug?: () => Record<string, unknown> | null
   pickSaveDirectory?: () => Promise<string>
   openSaveDirectory?: () => Promise<boolean> | boolean
+  openExternalLink?: (url: string) => Promise<boolean> | boolean
   listSavedRecords?: () => Promise<SavedRecordManifest>
   deleteSavedRecord?: (recordId: string) => Promise<unknown>
   repinSavedRecord?: (recordId: string) => Promise<RecordBridgeResult>
   runCaptureTranslationPin?: () => Promise<WorkflowBridgeResult>
 }
 
-const currentView = ref<ScreenTranslationView>('records')
+const WORKFLOW_RESULT_EVENT = 'screen-shot-translation:workflow-result'
+
+// run 入口需要静默执行，初始态先不渲染任何页面，等 feature code 再决定承载面。
+const currentView = ref<ScreenTranslationView>('idle')
 const records = ref<ScreenTranslationRecord[]>([])
 const recordsLoading = ref(false)
 const uiSettings = ref<UiSettings>({ ...DEFAULT_UI_SETTINGS })
@@ -78,10 +90,21 @@ const recordsWarningMessage = ref('')
 const resultRetryMode = ref<'workflow' | 'repin' | ''>('')
 const resultRetryRecordId = ref('')
 let systemThemeQuery: MediaQueryList | null = null
+let workflowResultEventListener: ((event: Event) => void) | null = null
 
 type WorkflowResultState = WorkflowResultPresentation & {
   visible: boolean
   code: string
+}
+
+type TranslationDebugInfo = {
+  errorCode?: string
+  errorMessage?: string
+  fallbackErrorCode?: string
+  fallbackErrorMessage?: string
+  composedImageStrategy?: string
+  attemptedPasteMode?: number
+  fallbackPasteMode?: number
 }
 
 const resolvedThemeMode = computed(() =>
@@ -89,6 +112,10 @@ const resolvedThemeMode = computed(() =>
 )
 const themeStatus = computed(() =>
   formatThemeStatus(uiSettings.value.themeMode, resolvedThemeMode.value),
+)
+// 瀑布流布局要按列拆数据，这里保留单独的视图模型，避免组件里再推导顺序。
+const recordColumns = computed(() =>
+  splitRecordsIntoVisualColumns(records.value, uiSettings.value.recordsColumnCount),
 )
 const recordsEmptyStateTitle = '暂时还没有钉住记录'
 const recordsEmptyStateCopy = computed(() =>
@@ -145,6 +172,17 @@ function applyPluginWindowHeight(windowHeight: number) {
   }
 }
 
+// run 入口会先把主窗口收起来，后续只要要展示记录页、设置页或失败结果，就显式拉回主窗口。
+function ensureMainWindowVisible() {
+  if (typeof window.utools?.showMainWindow === 'function') {
+    try {
+      window.utools.showMainWindow()
+    } catch {
+      // 主窗口可见性恢复失败时保留静默兜底，避免再把失败态扩大成新的页面异常。
+    }
+  }
+}
+
 // 每次 UI 设置变化后都统一刷新主题和窗口高度，避免两个副作用各自分叉。
 function syncUiPresentation() {
   applyThemeMode()
@@ -171,6 +209,7 @@ function setWorkflowFailure(
   retryMode: 'workflow' | 'repin' | '' = 'workflow',
   retryRecordId = '',
 ) {
+  ensureMainWindowVisible()
   workflowResult.value = {
     visible: true,
     code,
@@ -184,6 +223,7 @@ function setWorkflowFailure(
 
 // 进入记录页前先把失败态清掉，避免上一轮流程文案残留到新的视图里。
 function goRecords() {
+  ensureMainWindowVisible()
   currentView.value = 'records'
   workflowResult.value = createEmptyWorkflowResultState()
   recordsWarningMessage.value = ''
@@ -195,6 +235,7 @@ function goRecords() {
 
 // 设置页只做视图切换，不额外保留旧的结果态。
 function openSettings() {
+  ensureMainWindowVisible()
   currentView.value = 'settings'
   workflowResult.value = createEmptyWorkflowResultState()
 }
@@ -289,6 +330,69 @@ async function openSaveDirectory() {
   await services?.openSaveDirectory?.()
 }
 
+// 设置页资源链接统一走 preload bridge，确保在 uTools 容器里也会落到系统浏览器。
+async function openResourceLink(url: string) {
+  const services = getServices()
+  const openedByBridge = await services?.openExternalLink?.(url)
+
+  if (!openedByBridge && typeof window.open === 'function') {
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+}
+
+function formatBaiduErrorSummary(errorCode = '', errorMessage = '') {
+  const normalizedCode = typeof errorCode === 'string' ? errorCode.trim() : ''
+  const normalizedMessage = typeof errorMessage === 'string' ? errorMessage.trim() : ''
+
+  if (normalizedCode && normalizedMessage) {
+    return `${normalizedCode}：${normalizedMessage}`
+  }
+
+  return normalizedCode || normalizedMessage
+}
+
+// 翻译失败时优先把百度返回的真实错误原因映射成可读文案，避免结果页只有泛化失败。
+function buildTranslationFailureOverride(debug: TranslationDebugInfo | null): Partial<WorkflowResultPresentation> | null {
+  if (!debug || typeof debug !== 'object') {
+    return null
+  }
+
+  const primaryErrorSummary = formatBaiduErrorSummary(debug.errorCode, debug.errorMessage)
+  const fallbackErrorSummary = formatBaiduErrorSummary(debug.fallbackErrorCode, debug.fallbackErrorMessage)
+  const attemptedPasteMode =
+    typeof debug.attemptedPasteMode === 'number' ? `paste=${debug.attemptedPasteMode}` : 'paste=2'
+  const fallbackPasteMode =
+    typeof debug.fallbackPasteMode === 'number' ? `，回退 paste=${debug.fallbackPasteMode}` : ''
+
+  if (debug.errorCode === '54001' || debug.errorCode === '55002' || debug.fallbackErrorCode === '54001' || debug.fallbackErrorCode === '55002') {
+    return {
+      message: `百度接口返回鉴权失败（${primaryErrorSummary || fallbackErrorSummary}）。请检查设置页里的 AppID 和 Access Token 是否匹配、是否过期。`,
+      showOpenSettings: true,
+    }
+  }
+
+  if (debug.errorCode === '55006' || debug.fallbackErrorCode === '55006') {
+    return {
+      message: `百度接口返回服务未开通（${primaryErrorSummary || fallbackErrorSummary}）。请先在开放平台确认图片翻译 V2 服务已经开通。`,
+      showOpenSettings: true,
+    }
+  }
+
+  if (primaryErrorSummary || fallbackErrorSummary) {
+    return {
+      message: `百度接口返回错误。首次尝试 ${attemptedPasteMode}${fallbackPasteMode}。${primaryErrorSummary ? `主请求：${primaryErrorSummary}。` : ''}${fallbackErrorSummary ? `回退请求：${fallbackErrorSummary}。` : ''}`,
+    }
+  }
+
+  if (debug.composedImageStrategy === 'missing-image' || debug.composedImageStrategy === 'block-compose') {
+    return {
+      message: `百度翻译接口已返回文本结果，但没有生成可用的贴合图片。当前尝试 ${attemptedPasteMode}${fallbackPasteMode} 后仍未拿到可展示图片。`,
+    }
+  }
+
+  return null
+}
+
 // 结果页的“重试”要跟着失败来源走，不能把重钉失败误导成重新开始截屏主流程。
 async function retryWorkflowResult() {
   if (resultRetryMode.value === 'repin' && resultRetryRecordId.value) {
@@ -299,7 +403,33 @@ async function retryWorkflowResult() {
   await runMainWorkflowEntry()
 }
 
-// 主流程只在 run 入口触发，先调用 preload 的真实编排，再把失败码映射成结果页。
+// 主流程结果统一在渲染层做结果页映射，run 入口和结果页重试共用这一套分支。
+function handleWorkflowResult(result: WorkflowBridgeResult | null | undefined) {
+  if (!result) {
+    return
+  }
+
+  if (result.ok) {
+    void refreshRecords()
+    workflowResult.value = createEmptyWorkflowResultState()
+    resultRetryMode.value = ''
+    resultRetryRecordId.value = ''
+    return
+  }
+
+  if (result.code === 'translation-failed') {
+    const translationDebug = result.translationDebug as TranslationDebugInfo | null | undefined
+    setWorkflowFailure(
+      result.code as WorkflowFailureCode,
+      buildTranslationFailureOverride(translationDebug ?? null) ?? undefined,
+    )
+    return
+  }
+
+  setWorkflowFailure(result.code as WorkflowFailureCode)
+}
+
+// 主流程只在 run 入口和结果页重试时触发，截图仍走官方 screenCapture。
 async function runMainWorkflowEntry() {
   const services = getServices()
 
@@ -322,20 +452,7 @@ async function runMainWorkflowEntry() {
       return
     }
 
-    if (result.ok) {
-      if (typeof window.utools?.hideMainWindow === 'function') {
-        window.utools.hideMainWindow()
-        workflowResult.value = createEmptyWorkflowResultState()
-        resultRetryMode.value = ''
-        resultRetryRecordId.value = ''
-        return
-      }
-
-      goRecords()
-      return
-    }
-
-    setWorkflowFailure(result.code as WorkflowFailureCode)
+    handleWorkflowResult(result)
   } finally {
     recordsLoading.value = false
   }
@@ -429,7 +546,7 @@ function detachSystemThemeListener() {
   systemThemeQuery.removeListener(handleSystemThemeChange)
 }
 
-// 所有入口都先统一走这里，避免 run / records / settings 三种入口各写一套切换逻辑。
+// 所有入口都在渲染层统一收口；run 入口依赖 feature.mainHide 静默执行，不需要先展示主窗口。
 async function handlePluginEnter(event: { code?: string } = {}) {
   readPersistedState()
 
@@ -444,8 +561,7 @@ async function handlePluginEnter(event: { code?: string } = {}) {
   }
 
   if (event.code === 'screen-shot-translation-run' || event.code === undefined) {
-    currentView.value = 'records'
-    await runMainWorkflowEntry()
+    currentView.value = 'idle'
     return
   }
 
@@ -462,9 +578,13 @@ onMounted(() => {
   attachSystemThemeListener()
   readPersistedState()
   void refreshRecords()
+  const services = getServices()
 
-  if (!getServices()) {
+  if (!services) {
     previewWarningMessage.value = '当前处于浏览器预览模式，状态保存和运行桥接尚未注入。'
+    if (currentView.value === 'idle') {
+      currentView.value = 'records'
+    }
   } else {
     previewWarningMessage.value = ''
   }
@@ -473,6 +593,24 @@ onMounted(() => {
     window.utools.onPluginEnter((event) => {
       void handlePluginEnter(event ?? {})
     })
+  }
+
+  if (typeof window.addEventListener === 'function') {
+    workflowResultEventListener = (event) => {
+      const detail = (event as CustomEvent<WorkflowBridgeResult | null | undefined>).detail
+      handleWorkflowResult(detail)
+    }
+    window.addEventListener(WORKFLOW_RESULT_EVENT, workflowResultEventListener as EventListener)
+  }
+
+  const pendingEnter = services?.consumePendingPluginEnter?.()
+  if (pendingEnter) {
+    void handlePluginEnter(pendingEnter)
+  }
+
+  const pendingWorkflowResult = services?.consumePendingWorkflowResult?.()
+  if (pendingWorkflowResult) {
+    handleWorkflowResult(pendingWorkflowResult)
   }
 
   if (typeof window.utools?.onDbPull === 'function') {
@@ -485,6 +623,11 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   detachSystemThemeListener()
+
+  if (workflowResultEventListener && typeof window.removeEventListener === 'function') {
+    window.removeEventListener(WORKFLOW_RESULT_EVENT, workflowResultEventListener as EventListener)
+    workflowResultEventListener = null
+  }
 })
 </script>
 
@@ -492,6 +635,7 @@ onBeforeUnmount(() => {
   <HomeView
     v-if="currentView === 'records'"
     :records="records"
+    :record-columns="recordColumns"
     :loading="recordsLoading"
     :empty-state-title="recordsEmptyStateTitle"
     :empty-state-copy="recordsEmptyStateCopy"
@@ -511,6 +655,7 @@ onBeforeUnmount(() => {
     :ui-settings="uiSettings"
     :theme-status="themeStatus"
     @back="goRecords"
+    @open-resource-link="openResourceLink"
     @open-save-directory="openSaveDirectory"
     @pick-save-directory="pickSaveDirectory"
     @save-plugin-settings="savePluginSettings"
@@ -518,8 +663,11 @@ onBeforeUnmount(() => {
     @save-ui-settings="saveUiSettings"
   />
 
+  <!-- idle 只给 run 入口留空白承载，不能再误落到失败结果页壳子。 -->
+  <div v-else-if="currentView === 'idle'" aria-hidden="true"></div>
+
   <ResultView
-    v-else
+    v-else-if="currentView === 'result'"
     :code="workflowResult.code"
     :title="workflowResult.title"
     :message="workflowResult.message"

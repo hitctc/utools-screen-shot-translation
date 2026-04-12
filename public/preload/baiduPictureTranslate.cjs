@@ -1,23 +1,39 @@
-const crypto = require('crypto')
 const https = require('https')
+const { buildImageDataUrlFromBase64 } = require('./imageMime.cjs')
+const { composeTranslatedBlocksToPng } = require('./baiduPictureCompose.cjs')
 
-const BAIDU_PICTURE_TRANSLATE_URL = 'https://fanyi-api.baidu.com/api/trans/sdk/picture'
-const BAIDU_CUID = 'APICUID'
-const BAIDU_MAC = 'mac'
-const BAIDU_VERSION = '3'
-const BAIDU_PASTE = '1'
+const BAIDU_PICTURE_TRANSLATE_V2_URL = 'https://fanyi-api.baidu.com/ait/api/picture/translate'
 const BAIDU_ENV_KEYS = {
   appId: 'BAIDU_FANYI_APP_ID',
-  appKey: 'BAIDU_FANYI_APP_KEY',
+  accessToken: 'BAIDU_FANYI_ACCESS_TOKEN',
+}
+let lastTranslationDebug = null
+
+function setLastTranslationDebug(payload) {
+  lastTranslationDebug = payload && typeof payload === 'object' ? { ...payload } : null
 }
 
-// 同步凭证和环境变量都可能作为输入，这里统一做最小归一化。
+function getLastTranslationDebug() {
+  return lastTranslationDebug ? { ...lastTranslationDebug } : null
+}
+
+function normalizeBaiduErrorCode(value) {
+  const normalizedValue = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : ''
+  return normalizedValue && normalizedValue !== '0' ? normalizedValue : ''
+}
+
+function normalizeBaiduErrorMessage(value) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+// V2 当前是唯一保留的图片翻译接入方式，这里只保留 AppID 和 Access Token。
+// 统一 trim 是为了避免同步文档或环境变量里的脏空格干扰实际鉴权。
 function normalizeCredentials(raw) {
   const candidate = raw && typeof raw === 'object' ? raw : {}
 
   return {
     appId: typeof candidate.appId === 'string' ? candidate.appId.trim() : '',
-    appKey: typeof candidate.appKey === 'string' ? candidate.appKey.trim() : '',
+    accessToken: typeof candidate.accessToken === 'string' ? candidate.accessToken.trim() : '',
   }
 }
 
@@ -30,7 +46,7 @@ function normalizeTranslationMode(value) {
   return 'auto'
 }
 
-// 百度要求签名直接基于原始图片字节，因此这里统一把截图结果解成 Buffer。
+// 百度接口都要求基于原始图片字节或 base64 发送，这里统一把截图结果解成 Buffer 与纯 base64。
 function decodeCapturedImage(image) {
   if (typeof image !== 'string' || !image.trim()) {
     return null
@@ -43,28 +59,47 @@ function decodeCapturedImage(image) {
 
     return {
       imageBuffer: Buffer.from(base64Payload, 'base64'),
+      imageBase64: base64Payload,
       imageMimeType: mimeType || 'image/png',
+      imageDataUrl: trimmed,
     }
   }
 
   return {
     imageBuffer: Buffer.from(trimmed, 'base64'),
+    imageBase64: trimmed,
     imageMimeType: 'image/png',
+    imageDataUrl: `data:image/png;base64,${trimmed}`,
   }
 }
 
-// 成功响应里优先取 sumSrc / sumDst，没有时再拼分段内容，保证自动模式能做语言判断。
-function getAggregateText(value, fieldName) {
-  if (typeof value?.[fieldName] === 'string' && value[fieldName].trim()) {
-    return value[fieldName].trim()
+// 成功响应里优先取汇总字段，没有时再拼分段内容，保证自动模式能做语言判断。
+function getAggregateText(value, fieldNames) {
+  for (const fieldName of fieldNames) {
+    if (typeof value?.[fieldName] === 'string' && value[fieldName].trim()) {
+      return value[fieldName].trim()
+    }
   }
 
-  if (!Array.isArray(value?.content)) {
+  const contentList = Array.isArray(value?.content)
+    ? value.content
+    : Array.isArray(value?.contents)
+      ? value.contents
+      : []
+  if (!contentList.length) {
     return ''
   }
 
-  return value.content
-    .map((item) => (typeof item?.[fieldName === 'sumSrc' ? 'src' : 'dst'] === 'string' ? item[fieldName === 'sumSrc' ? 'src' : 'dst'] : ''))
+  return contentList
+    .map((item) => {
+      for (const fieldName of fieldNames) {
+        if (typeof item?.[fieldName] === 'string') {
+          return item[fieldName]
+        }
+      }
+
+      return ''
+    })
     .filter(Boolean)
     .join(' ')
     .trim()
@@ -99,23 +134,109 @@ function normalizeBaiduLanguage(value) {
   return ''
 }
 
-// 结果页和后续钉住 / 保存链路只吃统一字段，不直接暴露百度原始响应。
-function mapSuccessfulTranslationResult(responseData) {
-  const translatedImageBase64 = typeof responseData?.pasteImg === 'string' ? responseData.pasteImg.trim() : ''
-  if (!translatedImageBase64) {
+function mapCommonTranslationResult({
+  responseData,
+  translatedImageBase64,
+  provider,
+  version,
+}) {
+  const normalizedImageBase64 =
+    typeof translatedImageBase64 === 'string' ? translatedImageBase64.trim() : ''
+  if (!normalizedImageBase64) {
     return null
   }
 
+  const contentList = Array.isArray(responseData?.content)
+    ? responseData.content
+    : Array.isArray(responseData?.contents)
+      ? responseData.contents
+      : []
+
   return {
     ok: true,
-    provider: 'baidu-picture-translate',
+    provider,
+    version,
     from: typeof responseData?.from === 'string' ? responseData.from : '',
     to: typeof responseData?.to === 'string' ? responseData.to : '',
-    sourceText: getAggregateText(responseData, 'sumSrc'),
-    translatedText: getAggregateText(responseData, 'sumDst'),
+    sourceText: getAggregateText(responseData, ['sumSrc', 'src']),
+    translatedText: getAggregateText(responseData, ['sumDst', 'dst']),
+    translatedImageBase64: normalizedImageBase64,
+    translatedImageDataUrl: buildImageDataUrlFromBase64(normalizedImageBase64),
+    content: contentList,
+  }
+}
+
+// V2 的返回字段改成 snake_case，这里统一映射成现有主流程可消费的契约。
+function mapSuccessfulTranslationResultV2(responseData, translatedImageBase64) {
+  return mapCommonTranslationResult({
+    responseData,
     translatedImageBase64,
-    translatedImageDataUrl: `data:image/png;base64,${translatedImageBase64}`,
-    content: Array.isArray(responseData?.content) ? responseData.content : [],
+    provider: 'baidu-picture-translate',
+    version: 'v2',
+  })
+}
+
+// V2 优先走块级回填拼图；如果块数据不可用，再退回官方整图 paste_img。
+async function resolveTranslatedImageBase64V2({
+  responseData,
+  captureImage,
+  composeTranslatedBlocks,
+  electron,
+}) {
+  const contentList = Array.isArray(responseData?.contents) ? responseData.contents : []
+  const hasBlockPasteImages = contentList.some(
+    (item) => typeof item?.paste_img === 'string' && item.paste_img.trim(),
+  )
+  const hasRenderableBlockText = contentList.some(
+    (item) =>
+      (typeof item?.dst === 'string' && item.dst.trim()) &&
+      (typeof item?.rect === 'string' || (item?.rect && typeof item.rect === 'object') || (item && typeof item === 'object')),
+  )
+  const responseHasTopLevelPasteImage = typeof responseData?.paste_img === 'string' && responseData.paste_img.trim() !== ''
+  const debug = {
+    responseHasTopLevelPasteImage,
+    responseContentCount: contentList.length,
+    responseContentPasteImageCount: contentList.filter(
+      (item) => typeof item?.paste_img === 'string' && item.paste_img.trim(),
+    ).length,
+    composedImageStrategy: 'missing-image',
+    composedImageSucceeded: false,
+  }
+
+  if ((hasBlockPasteImages || hasRenderableBlockText) && typeof composeTranslatedBlocks === 'function') {
+    const composedImage = await composeTranslatedBlocks({
+      captureImage,
+      responseData,
+      electron,
+    })
+
+    if (composedImage?.ok && typeof composedImage.translatedImageBase64 === 'string') {
+      return {
+        translatedImageBase64: composedImage.translatedImageBase64.trim(),
+        debug: {
+          ...debug,
+          composedImageStrategy: hasBlockPasteImages ? 'block-compose' : 'block-text-compose',
+          composedImageSucceeded: true,
+        },
+      }
+    }
+
+    debug.composedImageStrategy = hasBlockPasteImages ? 'block-compose' : 'block-text-compose'
+  }
+
+  if (responseHasTopLevelPasteImage) {
+    return {
+      translatedImageBase64: responseData.paste_img.trim(),
+      debug: {
+        ...debug,
+        composedImageStrategy: 'top-level-paste',
+      },
+    }
+  }
+
+  return {
+    translatedImageBase64: '',
+    debug,
   }
 }
 
@@ -153,69 +274,36 @@ function chooseAutoTranslationResult(primaryResult, secondaryResult) {
   return primaryResult
 }
 
-// 百度接口需要 multipart/form-data，这里保持纯 Node 实现，避免依赖运行时的 fetch/FormData。
-function buildMultipartBody({ fields, imageBuffer, imageMimeType, boundary }) {
-  const chunks = []
-
-  Object.entries(fields).forEach(([name, value]) => {
-    chunks.push(Buffer.from(`--${boundary}\r\n`))
-    chunks.push(Buffer.from(`Content-Disposition: form-data; name="${name}"\r\n\r\n`))
-    chunks.push(Buffer.from(String(value)))
-    chunks.push(Buffer.from('\r\n'))
-  })
-
-  const extension = imageMimeType === 'image/jpeg' || imageMimeType === 'image/jpg' ? 'jpg' : 'png'
-  chunks.push(Buffer.from(`--${boundary}\r\n`))
-  chunks.push(Buffer.from(`Content-Disposition: form-data; name="image"; filename="capture.${extension}"\r\n`))
-  chunks.push(Buffer.from(`Content-Type: ${imageMimeType}\r\n\r\n`))
-  chunks.push(imageBuffer)
-  chunks.push(Buffer.from(`\r\n--${boundary}--\r\n`))
-
-  return Buffer.concat(chunks)
-}
-
-// 请求层只负责把百度接口的 JSON 响应拿回来，调用方再决定如何解释错误。
-function requestBaiduPictureTranslate({
+// V2 根据官方文档改成 JSON 请求，并固定开启高精擦除模式以争取更好的版式还原。
+// 运行时探测已确认接口实际识别的是 Authorization Bearer 头，而不是 query/body 里的 access_token。
+function requestBaiduPictureTranslateV2({
   appId,
-  appKey,
+  accessToken,
   from,
   to,
-  imageBuffer,
-  imageMimeType,
-  salt,
+  imageBase64,
+  paste = 2,
 }) {
-  const sign = crypto
-    .createHash('md5')
-    .update(
-      `${appId}${crypto.createHash('md5').update(imageBuffer).digest('hex')}${salt}${BAIDU_CUID}${BAIDU_MAC}${appKey}`,
-    )
-    .digest('hex')
-  const boundary = `----utools-screen-shot-translation-${salt}`
-  const body = buildMultipartBody({
-    fields: {
-      from,
-      to,
-      appid: appId,
-      salt,
-      cuid: BAIDU_CUID,
-      mac: BAIDU_MAC,
-      version: BAIDU_VERSION,
-      paste: BAIDU_PASTE,
-      sign,
-    },
-    imageBuffer,
-    imageMimeType,
-    boundary,
+  const payload = JSON.stringify({
+    from,
+    to,
+    appid: appId,
+    content: imageBase64,
+    paste,
+    need_intervene: 0,
+    view_type: 1,
+    model_type: 'nmt',
   })
 
   return new Promise((resolve, reject) => {
     const request = https.request(
-      BAIDU_PICTURE_TRANSLATE_URL,
+      BAIDU_PICTURE_TRANSLATE_V2_URL,
       {
         method: 'POST',
         headers: {
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Content-Length': body.length,
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Length': Buffer.byteLength(payload),
         },
       },
       (response) => {
@@ -226,8 +314,7 @@ function requestBaiduPictureTranslate({
         })
         response.on('end', () => {
           try {
-            const payload = Buffer.concat(chunks).toString('utf8')
-            resolve(JSON.parse(payload))
+            resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')))
           } catch (error) {
             reject(error)
           }
@@ -236,40 +323,162 @@ function requestBaiduPictureTranslate({
     )
 
     request.on('error', reject)
-    request.write(body)
+    request.write(payload)
     request.end()
   })
 }
 
-// 单方向翻译结果统一在这里映射，调用方只关心成功态和稳定失败码。
-async function translateWithDirection({
+function shouldTreatV2ResponseAsFailure(response) {
+  const errorCode = normalizeBaiduErrorCode(response?.error_code)
+  if (errorCode) {
+    return true
+  }
+
+  const errorMessage = normalizeBaiduErrorMessage(response?.error_msg)
+  if (!errorMessage) {
+    return false
+  }
+
+  const hasTranslatedText =
+    typeof response?.src === 'string' ||
+    typeof response?.dst === 'string' ||
+    Array.isArray(response?.contents)
+
+  return !hasTranslatedText
+}
+
+async function translateWithDirectionV2({
   direction,
   credentials,
   captureImage,
   requestImpl,
-  createSalt,
+  composeTranslatedBlocks,
+  electron,
+  translationMode,
 }) {
   try {
-    const response = await requestImpl({
+    const primaryResponse = await requestImpl({
       appId: credentials.appId,
-      appKey: credentials.appKey,
+      accessToken: credentials.accessToken,
       from: direction.from,
       to: direction.to,
-      imageBuffer: captureImage.imageBuffer,
-      imageMimeType: captureImage.imageMimeType,
-      salt: createSalt(),
+      imageBase64: captureImage.imageBase64,
+      paste: 2,
     })
 
-    if (String(response?.error_code) !== '0') {
+    const primaryErrorCode = normalizeBaiduErrorCode(primaryResponse?.error_code)
+    const primaryErrorMessage = normalizeBaiduErrorMessage(primaryResponse?.error_msg)
+    const canRetryWithPaste1 = primaryErrorCode === '55004'
+
+    if (shouldTreatV2ResponseAsFailure(primaryResponse) && !canRetryWithPaste1) {
+      setLastTranslationDebug({
+        attemptedVersion: 'v2',
+        usedVersion: '',
+        translationMode,
+        credentialMode: 'v2',
+        responseHasTopLevelPasteImage: false,
+        responseContentCount: 0,
+        responseContentPasteImageCount: 0,
+        composedImageStrategy: 'request-failed',
+        composedImageSucceeded: false,
+        errorCode: primaryErrorCode,
+        errorMessage: primaryErrorMessage,
+        attemptedPasteMode: 2,
+      })
       return {
         ok: false,
         code: 'translation-failed',
       }
     }
 
-    const mappedResult = mapSuccessfulTranslationResult(response.data)
-    return mappedResult ?? { ok: false, code: 'translation-failed' }
-  } catch {
+    const resolvedImage = await resolveTranslatedImageBase64V2({
+      responseData: primaryResponse,
+      captureImage,
+      composeTranslatedBlocks,
+      electron,
+    })
+
+    const primaryMappedResult = mapSuccessfulTranslationResultV2(
+      primaryResponse,
+      resolvedImage.translatedImageBase64,
+    )
+
+    if (primaryMappedResult) {
+      setLastTranslationDebug({
+        attemptedVersion: 'v2',
+        usedVersion: 'v2',
+        translationMode,
+        credentialMode: 'v2',
+        ...resolvedImage.debug,
+      })
+      return primaryMappedResult
+    }
+
+    const fallbackResponse = await requestImpl({
+      appId: credentials.appId,
+      accessToken: credentials.accessToken,
+      from: direction.from,
+      to: direction.to,
+      imageBase64: captureImage.imageBase64,
+      paste: 1,
+    })
+    const fallbackErrorCode = normalizeBaiduErrorCode(fallbackResponse?.error_code)
+    const fallbackErrorMessage = normalizeBaiduErrorMessage(fallbackResponse?.error_msg)
+
+    if (shouldTreatV2ResponseAsFailure(fallbackResponse)) {
+      setLastTranslationDebug({
+        attemptedVersion: 'v2',
+        usedVersion: '',
+        translationMode,
+        credentialMode: 'v2',
+        ...resolvedImage.debug,
+        fallbackPasteMode: 1,
+        fallbackErrorCode,
+        fallbackErrorMessage,
+        attemptedPasteMode: 2,
+      })
+      return {
+        ok: false,
+        code: 'translation-failed',
+      }
+    }
+
+    const fallbackMappedResult = mapSuccessfulTranslationResultV2(
+      fallbackResponse,
+      fallbackResponse?.paste_img,
+    )
+
+    setLastTranslationDebug({
+      attemptedVersion: 'v2',
+      usedVersion: fallbackMappedResult ? 'v2' : '',
+      translationMode,
+      credentialMode: 'v2',
+      responseHasTopLevelPasteImage: typeof fallbackResponse?.paste_img === 'string' && fallbackResponse.paste_img.trim() !== '',
+      responseContentCount: Array.isArray(fallbackResponse?.contents) ? fallbackResponse.contents.length : 0,
+      responseContentPasteImageCount: 0,
+      composedImageStrategy: fallbackMappedResult ? 'paste-1-fallback' : 'missing-image',
+      composedImageSucceeded: false,
+      attemptedPasteMode: 2,
+      fallbackPasteMode: 1,
+      errorCode: primaryErrorCode,
+      errorMessage: primaryErrorMessage,
+    })
+
+    return fallbackMappedResult ?? { ok: false, code: 'translation-failed' }
+  } catch (error) {
+    setLastTranslationDebug({
+      attemptedVersion: 'v2',
+      usedVersion: '',
+      translationMode,
+      credentialMode: 'v2',
+      responseHasTopLevelPasteImage: false,
+      responseContentCount: 0,
+      responseContentPasteImageCount: 0,
+      composedImageStrategy: 'request-failed',
+      composedImageSucceeded: false,
+      errorCode: '',
+      errorMessage: error instanceof Error ? error.message : '',
+    })
     return {
       ok: false,
       code: 'translation-failed',
@@ -277,19 +486,22 @@ async function translateWithDirection({
   }
 }
 
-// 自动模式默认先尝试中文 -> 英文，确认源文是英文后再补第二次英文 -> 中文请求。
-async function translateAutoMode({
+async function translateAutoModeV2({
   credentials,
   captureImage,
   requestImpl,
-  createSalt,
+  composeTranslatedBlocks,
+  electron,
+  translationMode,
 }) {
-  const zhToEnResult = await translateWithDirection({
+  const zhToEnResult = await translateWithDirectionV2({
     direction: { from: 'zh', to: 'en' },
     credentials,
     captureImage,
     requestImpl,
-    createSalt,
+    composeTranslatedBlocks,
+    electron,
+    translationMode,
   })
 
   if (!zhToEnResult.ok) {
@@ -302,12 +514,14 @@ async function translateAutoMode({
     return zhToEnResult
   }
 
-  const enToZhResult = await translateWithDirection({
+  const enToZhResult = await translateWithDirectionV2({
     direction: { from: 'en', to: 'zh' },
     credentials,
     captureImage,
     requestImpl,
-    createSalt,
+    composeTranslatedBlocks,
+    electron,
+    translationMode,
   })
 
   if (!enToZhResult.ok) {
@@ -317,24 +531,47 @@ async function translateAutoMode({
   return chooseAutoTranslationResult(zhToEnResult, enToZhResult)
 }
 
-// 翻译桥接对外只暴露一个入口，内部把环境变量、截图格式和百度请求细节全部收口。
+function resolveCredentialSet({ credentials, env }) {
+  const syncedCredentials = normalizeCredentials(credentials)
+  const envCredentials = normalizeCredentials({
+    appId: env?.[BAIDU_ENV_KEYS.appId],
+    accessToken: env?.[BAIDU_ENV_KEYS.accessToken],
+  })
+
+  return (
+    syncedCredentials.appId && syncedCredentials.accessToken
+      ? { appId: syncedCredentials.appId, accessToken: syncedCredentials.accessToken }
+      : envCredentials.appId && envCredentials.accessToken
+        ? { appId: envCredentials.appId, accessToken: envCredentials.accessToken }
+        : null
+  )
+}
+
+// 翻译桥接当前只保留 V2，避免设置模型、失败文案和实际调用再出现双轨语义。
 async function translateCapturedImage({
   captureResult,
   settings,
   credentials,
   env = process.env,
-  requestImpl = requestBaiduPictureTranslate,
-  createSalt = () => `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`,
+  requestImplV2 = requestBaiduPictureTranslateV2,
+  composeTranslatedBlocks = composeTranslatedBlocksToPng,
+  electron,
 } = {}) {
-  const syncedCredentials = normalizeCredentials(credentials)
-  const envCredentials = normalizeCredentials({
-    appId: env?.[BAIDU_ENV_KEYS.appId],
-    appKey: env?.[BAIDU_ENV_KEYS.appKey],
-  })
-  const resolvedCredentials =
-    syncedCredentials.appId && syncedCredentials.appKey ? syncedCredentials : envCredentials
+  const resolvedV2Credentials = resolveCredentialSet({ credentials, env })
+  const translationMode = normalizeTranslationMode(settings?.translationMode)
 
-  if (!resolvedCredentials.appId || !resolvedCredentials.appKey) {
+  if (!resolvedV2Credentials) {
+    setLastTranslationDebug({
+      attemptedVersion: '',
+      usedVersion: '',
+      translationMode,
+      credentialMode: '',
+      responseHasTopLevelPasteImage: false,
+      responseContentCount: 0,
+      responseContentPasteImageCount: 0,
+      composedImageStrategy: 'missing-credentials',
+      composedImageSucceeded: false,
+    })
     return {
       ok: false,
       code: 'translation-config-invalid',
@@ -343,43 +580,63 @@ async function translateCapturedImage({
 
   const captureImage = decodeCapturedImage(captureResult?.image)
   if (!captureImage || captureImage.imageBuffer.length === 0) {
+    setLastTranslationDebug({
+      attemptedVersion: resolvedV2Credentials ? 'v2' : '',
+      usedVersion: '',
+      translationMode,
+      credentialMode: resolvedV2Credentials ? 'v2' : '',
+      responseHasTopLevelPasteImage: false,
+      responseContentCount: 0,
+      responseContentPasteImageCount: 0,
+      composedImageStrategy: 'invalid-capture',
+      composedImageSucceeded: false,
+    })
     return {
       ok: false,
       code: 'translation-failed',
     }
   }
 
-  const translationMode = normalizeTranslationMode(settings?.translationMode)
+  const useV2 = !!resolvedV2Credentials
 
-  if (translationMode === 'en-to-zh') {
-    return translateWithDirection({
-      direction: { from: 'en', to: 'zh' },
-      credentials: resolvedCredentials,
+  if (useV2) {
+    if (translationMode === 'en-to-zh') {
+      return translateWithDirectionV2({
+        direction: { from: 'en', to: 'zh' },
+        credentials: resolvedV2Credentials,
+        captureImage,
+        requestImpl: requestImplV2,
+        composeTranslatedBlocks,
+        electron,
+        translationMode,
+      })
+    }
+
+    if (translationMode === 'zh-to-en') {
+      return translateWithDirectionV2({
+        direction: { from: 'zh', to: 'en' },
+        credentials: resolvedV2Credentials,
+        captureImage,
+        requestImpl: requestImplV2,
+        composeTranslatedBlocks,
+        electron,
+        translationMode,
+      })
+    }
+
+    return translateAutoModeV2({
+      credentials: resolvedV2Credentials,
       captureImage,
-      requestImpl,
-      createSalt,
+      requestImpl: requestImplV2,
+      composeTranslatedBlocks,
+      electron,
+      translationMode,
     })
   }
-
-  if (translationMode === 'zh-to-en') {
-    return translateWithDirection({
-      direction: { from: 'zh', to: 'en' },
-      credentials: resolvedCredentials,
-      captureImage,
-      requestImpl,
-      createSalt,
-    })
-  }
-
-  return translateAutoMode({
-    credentials: resolvedCredentials,
-    captureImage,
-    requestImpl,
-    createSalt,
-  })
 }
 
 module.exports = {
   BAIDU_ENV_KEYS,
+  getLastTranslationDebug,
   translateCapturedImage,
 }

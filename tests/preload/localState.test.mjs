@@ -15,13 +15,11 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
   const servicesModulePath = path.resolve('public/preload/services.js')
   const baiduPictureTranslateModulePath = path.resolve('public/preload/baiduPictureTranslate.cjs')
   const credentialStoreModulePath = path.resolve('public/preload/translationCredentialStore.cjs')
-  const customCaptureModulePath = path.resolve('public/preload/customCapture.cjs')
   const pinWindowManagerModulePath = path.resolve('public/preload/pinWindowManager.cjs')
   const recordStoreModulePath = path.resolve('public/preload/recordStore.cjs')
   delete require.cache[servicesModulePath]
   delete require.cache[baiduPictureTranslateModulePath]
   delete require.cache[credentialStoreModulePath]
-  delete require.cache[customCaptureModulePath]
   delete require.cache[pinWindowManagerModulePath]
   delete require.cache[recordStoreModulePath]
 
@@ -31,15 +29,6 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
       filename: baiduPictureTranslateModulePath,
       loaded: true,
       exports: options.baiduPictureTranslateModule,
-    }
-  }
-
-  if (Object.prototype.hasOwnProperty.call(options, 'customCaptureModule')) {
-    require.cache[customCaptureModulePath] = {
-      id: customCaptureModulePath,
-      filename: customCaptureModulePath,
-      loaded: true,
-      exports: options.customCaptureModule,
     }
   }
 
@@ -146,7 +135,6 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
       delete require.cache[servicesModulePath]
       delete require.cache[baiduPictureTranslateModulePath]
       delete require.cache[credentialStoreModulePath]
-      delete require.cache[customCaptureModulePath]
       delete require.cache[pinWindowManagerModulePath]
       delete require.cache[recordStoreModulePath]
     },
@@ -223,12 +211,13 @@ test('normalizePluginSettings preserves supported translation mode and trims sav
   )
 })
 
-test('services exposes the settings and custom capture bridge', () => {
+test('services exposes the settings and official screenshot bridge', () => {
   const { services, cleanup } = loadServicesWithStorage()
 
   assert.deepEqual(Object.keys(services).sort(), [
     'concealPluginWindow',
     'consumePendingPluginEnter',
+    'consumePendingWorkflowResult',
     'deleteSavedRecord',
     'getLastTranslationDebug',
     'getPluginSettings',
@@ -248,12 +237,13 @@ test('services exposes the settings and custom capture bridge', () => {
   cleanup()
 })
 
-test('preload plugin enter hides the main window immediately for main run windows and caches the event', () => {
+test('preload plugin enter 只缓存 run 事件，不再额外隐藏主窗口', async () => {
   let hideMainWindowCalls = 0
   const { services, triggerPluginEnter, getOutPluginCalls, cleanup } = loadServicesWithStorage(
     {},
     {
       getWindowType: () => 'main',
+      screenCapture: (callback) => callback(''),
       hideMainWindow: () => {
         hideMainWindowCalls += 1
         return true
@@ -262,8 +252,9 @@ test('preload plugin enter hides the main window immediately for main run window
   )
 
   triggerPluginEnter({ code: 'screen-shot-translation-run' })
+  await new Promise((resolve) => setImmediate(resolve))
 
-  assert.equal(hideMainWindowCalls, 1)
+  assert.equal(hideMainWindowCalls, 0)
   assert.equal(getOutPluginCalls(), 0)
   assert.deepEqual(services.consumePendingPluginEnter(), { code: 'screen-shot-translation-run' })
   assert.equal(services.consumePendingPluginEnter(), null)
@@ -271,18 +262,37 @@ test('preload plugin enter hides the main window immediately for main run window
   cleanup()
 })
 
-test('preload plugin enter uses outPlugin for detached run windows', () => {
-  const { services, triggerPluginEnter, getOutPluginCalls, cleanup } = loadServicesWithStorage(
+test('preload run 入口会直接启动 workflow，并把失败结果缓存给渲染层', async () => {
+  let screenCaptureCalls = 0
+  const { services, triggerPluginEnter, getShowMainWindowCalls, cleanup } = loadServicesWithStorage(
     {},
     {
-      getWindowType: () => 'detach',
+      screenCapture: (callback) => {
+        screenCaptureCalls += 1
+        callback('data:image/png;base64,abc123')
+      },
+      baiduPictureTranslateModule: {
+        translateCapturedImage: async () => ({
+          ok: false,
+          code: 'translation-failed',
+        }),
+        getLastTranslationDebug: () => null,
+      },
     },
   )
 
   triggerPluginEnter({ code: 'screen-shot-translation-run' })
+  await new Promise((resolve) => setImmediate(resolve))
 
-  assert.equal(getOutPluginCalls(), 1)
+  assert.equal(screenCaptureCalls, 1)
+  assert.equal(getShowMainWindowCalls(), 1)
   assert.deepEqual(services.consumePendingPluginEnter(), { code: 'screen-shot-translation-run' })
+  assert.deepEqual(services.consumePendingWorkflowResult(), {
+    ok: false,
+    code: 'translation-failed',
+    translationDebug: null,
+  })
+  assert.equal(services.consumePendingWorkflowResult(), null)
 
   cleanup()
 })
@@ -851,11 +861,6 @@ test('runCaptureTranslationPin starts the workflow after the official screenCapt
         screenCaptureCalls += 1
         callback('data:image/png;base64,abc123')
       },
-      customCaptureModule: {
-        captureImageWithCustomOverlay: async () => {
-          throw new Error('custom capture should not be used by runCaptureTranslationPin')
-        },
-      },
       baiduPictureTranslateModule: {
         translateCapturedImage: async ({ captureResult, settings, credentials }) => {
           assert.equal(captureResult.image, 'data:image/png;base64,abc123')
@@ -905,11 +910,6 @@ test('runCaptureTranslationPin keeps capture-cancelled when the official screenC
       screenCapture: (callback) => {
         screenCaptureCalls += 1
         callback('')
-      },
-      customCaptureModule: {
-        captureImageWithCustomOverlay: async () => {
-          throw new Error('custom capture should not be used by runCaptureTranslationPin')
-        },
       },
     },
   )

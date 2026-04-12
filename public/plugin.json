@@ -12,6 +12,7 @@
     {
       "code": "screen-shot-translation-run",
       "explain": "截屏、翻译并把翻译结果钉住到原位置",
+      "mainHide": true,
       "cmds": ["截屏翻译钉住"]
     },
     {

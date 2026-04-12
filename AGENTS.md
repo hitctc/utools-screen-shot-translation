@@ -22,11 +22,19 @@
 
 后续凡是涉及 `uTools API`、`plugin.json`、`preload`、接入开发、打包、发布、部署配置、启动方式等问题，优先查官方开发文档，不凭记忆臆断。
 
+调试与问题分析的输出约定：
+
+- 以后在本项目里做问题定位、实验记录和修复说明时，统一使用中文结构标题：
+  - `问题假设`
+  - `已做实验`
+  - `最小修复方案`
+- 不再混用 `Hypotheses`、`Experiments` 这类英文关键词，除非是在引用外部原文或 API 字段名。
+
 ## 2. 项目当前定位
 
 - 项目名称：`utools-screen-shot-translation`
 - 目标方向：做成一个在 `uTools` 内完成“截屏 -> 翻译 -> 钉住结果”的工具
-- 当前阶段：当前分支 `feature/custom-capture-pin` 已重新接回单屏自定义截图、百度图片翻译、真实钉住窗口和记录重钉；稳定主线仍以官方截图闭环为准
+- 当前阶段：当前分支 `feature/custom-capture-pin` 已把主流程重写为“官方截图 -> 百度图片翻译 -> 默认钉图 -> 按条件保存”，不再把自定义截图 overlay 作为主路径
 - 当前真实能力：
   - 插件身份已经切换为 `uTools Screen Shot Translation`
   - `public/plugin.json` 已定义 3 个入口：
@@ -35,7 +43,7 @@
     - `screen-shot-translation-settings` -> `设置`
   - `钉住记录` 页面已从保存目录总清单读取记录并渲染瀑布流卡片，默认 3 列，支持通过滑块调到 3~6 列并持久化
   - `设置` 页面已承载翻译方向、保存结果图片、保存目录、删除前二次确认，以及主题模式和窗口高度
-  - 设置页已可填写百度图片翻译 `AppID / AppKey`
+  - 设置页已可填写百度图片翻译 `AppID / Access Token`
   - `失败结果页` 已承载主流程失败、重钉失败和未知失败码的统一文案与动作
   - 支持 `跟随系统 / 深色 / 浅色` 三态主题
   - 支持在系统主题变化时同步刷新页面主题和状态文案
@@ -44,18 +52,22 @@
   - 支持 Vue 挂载前显示静态首屏壳子，避免纯白空屏
   - 插件设置模型已切到 `translationMode / saveTranslatedImage / saveDirectory / confirmBeforeDelete`，`preload` 侧已完成归一化和测试收口
   - `public/preload/recordStore.cjs` 已接通保存目录总清单的读取、整理、保存、删除和最后钉住位置更新
-  - `public/preload/baiduPictureTranslate.cjs` 已接通百度图片翻译签名、请求发送和自动方向选择
+  - `public/preload/baiduPictureTranslate.cjs` 已接通百度图片翻译请求发送、自动方向选择，以及 `V2` 块级回填优先的本地拼图
   - `public/preload/translationCredentialStore.cjs` 已接通百度凭证同步文档的读取与更新
+  - 已钉住窗口支持按鼠标指针中心进行滚轮缩放，macOS 下支持双指缩放，并会记住上次缩放后的大小
+- 已钉住窗口在聚焦时支持 `Cmd/Ctrl + C` 直接把当前图片复制到系统剪切板，复制的是位图不是文件路径；复制成功后会在窗口内显示短暂轻反馈
+- 已钉住窗口在聚焦时支持按 `ESC` 直接关闭当前这张图片；不做全局快捷键关闭
   - `public/preload/services.js` 已暴露 `pickSaveDirectory / listSavedRecords / deleteSavedRecord / repinSavedRecord / runCaptureTranslationPin`
 - 当前明确限制：
-  - 真实翻译目前只接了百度图片翻译，优先读取设置页同步的 `AppID / AppKey`，开发态仍支持 `BAIDU_FANYI_APP_ID / BAIDU_FANYI_APP_KEY` 兜底
-  - 自定义截图当前只支持鼠标所在屏幕，不支持跨屏联合选区
+  - 真实翻译当前只走百度图片翻译 `V2`，读取设置页同步的 `AppID / Access Token`；`V2` 优先使用块级 `contents[].paste_img` 在本地重新拼译后图，开发态仍支持环境变量兜底
+  - 当前主流程截图统一走 `utools.screenCapture(callback)`，因此暂不支持“按截图原位置钉回”
+  - 首次钉图默认落到当前屏幕右上角；只有记录重钉时才优先回到上次保存的位置
   - “当前哪些图片已钉住”只保存在插件进程内存里；插件进程结束后，只保留 manifest 中的最后位置
 - 当前技术栈：`Vue 3 + Vite 6 + @vitejs/plugin-vue + utools-api-types + Node built-in node:test`
 - 当前视觉基线：Nothing 风格中文桌面工具表达，深色优先、浅色同步，主题强调色固定为 `#d71921`
 - 当前界面字体：`Doto / Space Grotesk / Space Mono`
 - 当前运行模型：
-  - `uTools` 进入插件后由 `src/App.vue` 按 feature code 切到 `records / settings / result`，或执行 `run` 主流程入口
+  - `uTools` 进入插件后由 `src/App.vue` 按 feature code 切到 `records / settings / result`；`run` 主流程则在 `public/preload/services.js` 的 `onPluginEnter` 阶段直接启动，渲染层只负责承载失败结果
   - `public/preload/services.js` 通过 `window.services` 暴露当前正式保留的设置、记录、目录选择和主流程桥接能力
   - `public/preload/localState.cjs` 负责 UI 设置和插件设置的归一化
   - `src/screenTranslation/*` 负责记录页、设置页、结果页和对应 view-state 映射
@@ -70,15 +82,19 @@
 - `public/preload/package.json`
   固定 `preload` 目录使用 `commonjs`，不要在这里随意切成 ESM。
 - `public/preload/services.js`
-  负责桥接 `utools.dbStorage`、`utools.db`、目录选择、记录读取/保存/删除、自定义截图入口、百度翻译入口和真实钉住/重钉，并通过 `window.services` 暴露前端可消费的接口。
+  负责桥接 `utools.dbStorage`、`utools.db`、目录选择、记录读取/保存/删除、官方截图入口、百度翻译入口和真实钉住/重钉，并通过 `window.services` 暴露前端可消费的接口。`run` 入口的首次 `onPluginEnter` 也在这里预收口，用来在渲染层挂载前先静默隐藏当前插件窗口；当前隐藏策略统一优先走 `outPlugin()`，只在不可用时才回退到 `hideMainWindow()`。
 - `public/preload/baiduPictureTranslate.cjs`
-  负责百度图片翻译的图片解码、签名、请求发送和自动方向选择。
+  负责百度图片翻译的图片解码、请求发送、自动方向选择，以及 `V2` 块级译文的本地拼图回填。
+- `public/preload/baiduPictureCompose.cjs`
+  负责把百度图片翻译 `V2` 返回的块级 `paste_img` 和原截图背景重新拼成最终位图，继续供钉住与保存链路复用。
 - `public/preload/translationCredentialStore.cjs`
   负责百度凭证同步文档的读取、归一化和更新。
 - `public/preload/localState.cjs`
   负责 UI 设置与插件设置的归一化规则，包括主题模式、窗口高度、记录页列数，以及翻译保存相关的 `translationMode`、`saveTranslatedImage`、`saveDirectory` 和 `confirmBeforeDelete`。
 - `public/preload/recordStore.cjs`
   负责保存目录根目录下总清单文件 `.screen-translation-records.json` 的读、写、整理、删除和最后钉住位置更新。
+- `public/preload/pinWindowManager.cjs`
+  负责真实钉住窗口的创建、拖动、缩放、重复钉住前台提醒，以及 `lastPinBounds` 的持续回写。
 - `public/preload/workflow.cjs`
   负责主流程 `capture -> translate -> pin -> save` 的失败归因和统一返回契约，当前会透传步骤返回的明确失败码。
 - `src/App.vue`
@@ -102,7 +118,7 @@
 - `src/main.css`
   当前截屏翻译工具骨架页的基础样式和主题 token。
 - `tests/preload/localState.test.mjs`
-  负责当前 `preload` 正式保留的设置归一化与读写合并语义测试，包括目录选择、同步凭证桥接、自定义截图桥接、真实重钉桥接和局部更新持久化。
+  负责当前 `preload` 正式保留的设置归一化与读写合并语义测试，包括目录选择、同步凭证桥接、官方截图桥接、真实重钉桥接和局部更新持久化。
 - `tests/preload/translationCredentialStore.test.mjs`
   负责百度凭证同步文档的读写与局部更新测试。
 - `tests/preload/recordStore.test.mjs`
@@ -135,7 +151,7 @@
 当前已定义的 feature：
 
 - `screen-shot-translation-run`
-  通过 `截屏翻译钉住` 进入插件，执行主流程入口。当前分支会走 `自定义截图 -> 百度图片翻译 -> 原位钉住`。
+  通过 `截屏翻译钉住` 进入插件，执行主流程入口。当前主路径会走 `官方截图 -> 百度图片翻译 -> 默认右上角钉图 -> 按条件保存`，并且 `feature.mainHide` 已开启，不应主动把主窗口顶到前台。
 - `screen-shot-translation-records`
   通过 `钉住记录` 进入记录页，展示已保存目录中的总清单记录。
 - `screen-shot-translation-settings`
@@ -150,6 +166,7 @@
   - `README.md` 与 `AGENTS.md`
 - 所有需要 Node.js 权限的能力，优先放到 `public/preload/`，再通过 `window.services` 给前端使用；不要把系统能力直接散落到渲染层各处。
 - 当前 UI 不使用 `vue-router`，而是在 `App.vue` 内维护 `records / settings / result` 视图切换和 `run` 主流程入口。除非需求明显升级，否则不要提前引入完整路由系统。
+  当前约束是：`run` 首次进入不应主动把主窗口顶到前台；官方截图主流程应由 preload 直接触发，渲染层不能再承担启动截图的职责。
 - 当前记录页、结果页和设置页已经是正式承载面；当前分支主流程里的截图、翻译、钉住与记录重钉都是真实能力。后续如果改这条链路，必须明确是增强还是回归修复。
 
 ## 5. 运行与验证
@@ -169,7 +186,7 @@
 - `public/plugin.json` 的 `development.main` 会指向当前本地 Vite 地址 `http://localhost:5173`
 - 用 uTools 开发者工具接入开发时，应选择仓库内的 `public/plugin.json`
 - `public/preload/services.js`、`public/plugin.json` 或 `index.html` 变更后，不要只依赖热更新；按官方调试文档重新进入插件，必要时开启“退出到后台立即结束运行”
-- 如果再次出现“截图链路改动后所有入口一起白屏”，优先检查 `public/preload/services.js`、`public/preload/customCapture.cjs` 和子窗口 HTML 是否引入了新的启动期异常
+- 如果再次出现“截图链路改动后所有入口一起白屏”，优先检查 `public/preload/services.js`、`public/plugin.json`、`src/main.js` 和相关子窗口 HTML 是否引入了新的启动期异常
 
 当前项目的开发 / 预览 / 调试方式：
 
@@ -179,8 +196,9 @@
 4. 打开 `uTools 开发者工具`，在项目里选择本仓库的 `public/plugin.json`
 5. 点击 `接入开发`
 6. 在 uTools 中通过 `钉住记录`、`设置`、`截屏翻译钉住` 三个指令验证不同入口
-7. 如果要验证真实翻译，优先在设置页填写百度 `AppID / AppKey`
-   开发态只有在设置页未填写时，才继续回退到 `BAIDU_FANYI_APP_ID / BAIDU_FANYI_APP_KEY`
+   其中 `截屏翻译钉住` 入口应直接进入静默截图链路，不应先展示主窗口页面壳子。
+7. 如果要验证真实翻译，优先在设置页填写百度 `AppID / Access Token`
+   开发态只有在设置页未填写时，才继续回退到 `BAIDU_FANYI_APP_ID`、`BAIDU_FANYI_ACCESS_TOKEN`
 8. 改 `src/` 下的前端代码时，Vite 会热更新，回到插件窗口即可看到界面变化
 9. 需要看控制台、报错、网络请求或 DOM 时，进入插件后打开 `开发者工具`
 10. 确认 `钉住记录` 页面展示瀑布流记录或受控空态，而不是旧的三步流首页；有记录时默认 3 列，可通过顶部滑块调到 3~6 列
@@ -230,16 +248,20 @@
 15. 如果保存目录下已有记录，打开/关闭“删除前二次确认”后删除一条记录，确认确认框行为符合设置
 16. 通过 `截屏翻译钉住` 进入插件：
    如果设置页和环境变量都未配置百度凭证，应在截图后进入 `translation-config-invalid` 失败结果页，并可直接跳设置页补全。
-   如果已配置百度凭证且翻译成功，应直接把翻译结果按原截图位置钉住，而不是停在结果页。
+   如果已配置百度凭证且翻译成功，应直接把翻译结果默认钉到当前屏幕右上角，而不是停在结果页。
 17. 拖动已经钉住的图片，再关闭并重新从 `钉住记录` 打开同一张图，确认会回到关闭前最后一次位置。
-18. 同一张记录图已处于钉住状态时，再次点击该记录，确认只出现友好提示，不会重复创建窗口。
-19. 如果使用 `dist/plugin.json` 做构建产物验证，确认在没有启动 `npm run dev` 的情况下也能正常进入记录页、设置页和主流程，而不是统一白屏。
+18. 对已经钉住的图片执行鼠标滚轮缩放，确认会按指针中心平滑缩放；在 macOS 下再用双指向外扩 / 向内缩，确认同样生效且不卡顿。
+19. 缩放一张已经钉住的图片后关闭，再从 `钉住记录` 重新钉住同一张图，确认会恢复为上次缩放后的大小。
+20. 鼠标点击一张已经钉住的图片让它聚焦，再按 `Cmd+C`（macOS）或 `Ctrl+C`（Windows），确认系统剪切板里得到的是图片位图而不是文件路径；同时确认窗口右上角会出现短暂“已复制”反馈，外围边框会轻闪一下。
+21. 鼠标点击一张已经钉住的图片让它聚焦，再按 `ESC`，确认会关闭当前这张图片；未聚焦时不应误关别的窗口。
+22. 同一张记录图已处于钉住状态时，再次点击该记录，确认不再弹系统通知，而是把现有窗口拉到前台并左右晃动提示位置。
+23. 如果使用 `dist/plugin.json` 做构建产物验证，确认在没有启动 `npm run dev` 的情况下也能正常进入记录页、设置页和主流程，而不是统一白屏。
 
 ## 6. 配置与安全约束
 
-- 当前图片翻译优先读取设置页里通过 `utools.db` 同步的百度凭证；开发态仍可通过环境变量 `BAIDU_FANYI_APP_ID`、`BAIDU_FANYI_APP_KEY` 兜底。
+- 当前图片翻译优先读取设置页里通过 `utools.db` 同步的百度 `V2` 凭证；开发态仍可通过环境变量 `BAIDU_FANYI_APP_ID`、`BAIDU_FANYI_ACCESS_TOKEN` 兜底。
 - 不要把 secrets、tokens、cookies、授权码、私有路径或测试账号写进仓库。
-- 当前 `preload` 已暴露设置、记录、自定义截图、真实钉住和翻译能力；新增系统调用时仍要优先控制边界，不要默认把更多系统权限直接暴露给前端。
+- 当前 `preload` 已暴露设置、记录、官方截图、真实钉住和翻译能力；新增系统调用时仍要优先控制边界，不要默认把更多系统权限直接暴露给前端。
 - 当前设置通过 `utools.dbStorage` 保存，百度凭证通过 `utools.db` 同步，记录图片和总清单只落本机目录；后续再扩存储时先明确哪些可以同步、哪些只能本机保存。
 - 当前主题样式使用本地优先字体栈，不要为界面美化顺手新增运行时远程字体请求。
 - 除非需求明确变化，否则不要新增 telemetry、analytics 或额外网络上报。
@@ -255,7 +277,7 @@
 - 默认直接在 `main` 分支开发；只有用户明确要求分支隔离或 PR 流程时，才切到其他分支。
 - 完成最小可验证改动后，默认创建本地 commit；如果验证通过、提交边界清晰且工作区没有无关脏改，默认继续 push 到远端。
 - 以下情况不要自动 push：验证未通过、工作区混有无关修改、只做了分析没有形成可交付结果、改动里包含本地临时文件或敏感信息。
-- 当前已经具备单屏自定义截图、百度图片翻译和真实钉住。任何新增文案都必须明确区分“已实现能力”和“后续增强计划”，不要把未做的增强项写成已支持。
+- 当前已经具备官方截图、百度图片翻译和真实钉住。任何新增文案都必须明确区分“已实现能力”和“后续增强计划”，不要把未做的增强项写成已支持。
 
 ## 8. AGENTS.md 维护规则
 
@@ -279,9 +301,10 @@
   - `截屏翻译钉住 / 钉住记录 / 设置` 三个入口
   - 静态首屏壳子
   - 记录页 / 设置页 / 失败结果页三种承载面
-  - 单屏自定义截图桥接
-  - 百度图片翻译真实调用（优先读取设置页同步凭证，开发态支持环境变量兜底）
-  - 设置页百度凭证输入与 `utools.db` 同步存储
+  - 官方 `screenCapture` 截图桥接
+  - 百度图片翻译真实调用（优先读取设置页同步的 `V2` 凭证，开发态支持环境变量兜底）
+  - 百度图片翻译 `V2` 块级回填的本地拼图生成
+  - 设置页百度 `AppID / Access Token` 输入与 `utools.db` 同步存储
   - `跟随系统 / 深色 / 浅色` 三态主题
   - 主插件窗口高度设置与持久化
   - 记录页列数 `3 ~ 6` 的滑块调节与持久化
@@ -289,11 +312,11 @@
   - 保存目录总清单读取、整理、删除
   - 记录页瀑布流展示、目录选择、删除确认开关、删除失败 warning
   - 主流程失败结果页和重钉失败结果页
-  - 真实钉住窗口、拖动位置同步、双击关闭和重复钉住拦截
-  - `preload` 设置接口、记录接口、目录选择接口、自定义截图桥接、真实钉住桥接与测试覆盖
+  - 真实钉住窗口、拖动位置同步、指针中心缩放、聚焦后 `Cmd/Ctrl + C` 复制图片并显示轻反馈、双击关闭、聚焦后 `ESC` 关闭和重复钉住前台晃动提醒
+  - `preload` 设置接口、记录接口、目录选择接口、官方截图桥接、真实钉住桥接与测试覆盖
 - 当前仍未具备：
   - 真实 OCR
-  - 跨屏联合截图选区
+  - 按截图原位置钉回
   - 已钉住状态的跨进程恢复
 
-后续协作者如果继续推进功能，默认应从“如何把单屏自定义截图扩到跨屏”和“当前已钉住状态如何跨进程恢复”这两条主线思考，而不是再把功能回退到官方截图占位链路。
+后续协作者如果继续推进功能，默认应从“如何在保持主路径简洁的前提下增强截图能力”和“当前已钉住状态如何跨进程恢复”这两条主线思考，而不是再把主流程重新拉回冗余分支。

@@ -3,7 +3,7 @@ export type ScreenTranslationFeatureCode =
   | 'screen-shot-translation-records'
   | 'screen-shot-translation-settings'
 
-export type ScreenTranslationView = 'records' | 'settings' | 'result'
+export type ScreenTranslationView = 'idle' | 'records' | 'settings' | 'result'
 export type ScreenTranslationRecord = {
   id: string
   imagePath: string
@@ -37,7 +37,7 @@ export type PluginSettings = {
 
 export type TranslationCredentials = {
   appId: string
-  appKey: string
+  accessToken: string
 }
 
 export type WorkflowResultPresentation = {
@@ -63,7 +63,7 @@ export const DEFAULT_PLUGIN_SETTINGS: PluginSettings = {
 
 export const DEFAULT_TRANSLATION_CREDENTIALS: TranslationCredentials = {
   appId: '',
-  appKey: '',
+  accessToken: '',
 }
 
 export const WINDOW_HEIGHT_MIN = 480

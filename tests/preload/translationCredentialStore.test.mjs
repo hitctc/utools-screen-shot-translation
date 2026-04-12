@@ -11,15 +11,15 @@ const {
   saveTranslationCredentials,
 } = require('../../public/preload/translationCredentialStore.cjs')
 
-test('normalizeTranslationCredentials trims app id and app key', () => {
+test('normalizeTranslationCredentials trims app id 和 access token', () => {
   assert.deepEqual(
     normalizeTranslationCredentials({
       appId: '  test-app-id  ',
-      appKey: '  test-app-key  ',
+      accessToken: '  test-access-token  ',
     }),
     {
       appId: 'test-app-id',
-      appKey: 'test-app-key',
+      accessToken: 'test-access-token',
     },
   )
 })
@@ -33,7 +33,7 @@ test('getTranslationCredentials returns empty credentials when the sync document
 
   assert.deepEqual(result, {
     appId: '',
-    appKey: '',
+    accessToken: '',
   })
 })
 
@@ -62,22 +62,22 @@ test('saveTranslationCredentials creates the sync document and merges partial up
     appId: ' sync-app-id ',
   })
   const second = saveTranslationCredentials(db, {
-    appKey: ' sync-app-key ',
+    accessToken: ' sync-access-token ',
   })
 
   assert.deepEqual(first, {
     appId: 'sync-app-id',
-    appKey: '',
+    accessToken: '',
   })
   assert.deepEqual(second, {
     appId: 'sync-app-id',
-    appKey: 'sync-app-key',
+    accessToken: 'sync-access-token',
   })
   assert.deepEqual(storedDoc, {
     _id: TRANSLATION_CREDENTIALS_DOC_ID,
     _rev: '2-rev',
     appId: 'sync-app-id',
-    appKey: 'sync-app-key',
+    accessToken: 'sync-access-token',
     updatedAt: storedDoc.updatedAt,
   })
 })

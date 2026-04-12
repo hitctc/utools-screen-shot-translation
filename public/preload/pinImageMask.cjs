@@ -137,7 +137,44 @@ function findVisibleContentBounds({ data, width, height }) {
   }, width, height)
 }
 
+// 图片像素级 bbox 需要先映射到当前实际显示内容区，才能拿来改 pin window 几何。
+function scaleContentBoundsToTarget({
+  sourceWidth,
+  sourceHeight,
+  targetWidth,
+  targetHeight,
+  bounds,
+}) {
+  const normalizedBounds = bounds && typeof bounds === 'object' ? {
+    x: Math.round(Number(bounds.x)),
+    y: Math.round(Number(bounds.y)),
+    width: Math.round(Number(bounds.width)),
+    height: Math.round(Number(bounds.height)),
+  } : null
+
+  if (
+    !normalizedBounds ||
+    ![sourceWidth, sourceHeight, targetWidth, targetHeight].every(Number.isFinite) ||
+    sourceWidth <= 0 ||
+    sourceHeight <= 0 ||
+    targetWidth <= 0 ||
+    targetHeight <= 0 ||
+    normalizedBounds.width <= 0 ||
+    normalizedBounds.height <= 0
+  ) {
+    return null
+  }
+
+  return {
+    x: Math.round((normalizedBounds.x * targetWidth) / sourceWidth),
+    y: Math.round((normalizedBounds.y * targetHeight) / sourceHeight),
+    width: Math.max(1, Math.round((normalizedBounds.width * targetWidth) / sourceWidth)),
+    height: Math.max(1, Math.round((normalizedBounds.height * targetHeight) / sourceHeight)),
+  }
+}
+
 module.exports = {
   findVisibleContentBounds,
   removeEdgeNearWhitePixels,
+  scaleContentBoundsToTarget,
 }

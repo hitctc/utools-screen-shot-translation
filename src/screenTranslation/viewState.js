@@ -3,6 +3,25 @@ const RECORD_DATE_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
   timeStyle: 'short',
 })
 
+// 记录页现在按“每列一个数组”渲染，这里先把原始顺序按列拆开，保证视觉编号从左到右递增。
+export function splitRecordsIntoVisualColumns(records, columnCount) {
+  const safeRecords = Array.isArray(records) ? records : []
+  const safeColumnCount = Number.isFinite(columnCount) && columnCount > 0 ? Math.floor(columnCount) : 1
+
+  if (!safeRecords.length) {
+    return []
+  }
+
+  const actualColumnCount = Math.min(safeColumnCount, safeRecords.length)
+  const columns = Array.from({ length: actualColumnCount }, () => [])
+
+  safeRecords.forEach((record, index) => {
+    columns[index % actualColumnCount].push(record)
+  })
+
+  return columns
+}
+
 // 失败结果页必须始终给用户一个可读标题和可点击出口，未知失败码也不能例外。
 export function mapWorkflowFailureToResult(code) {
   switch (code) {
@@ -25,7 +44,7 @@ export function mapWorkflowFailureToResult(code) {
     case 'translation-config-invalid':
       return {
         title: '翻译配置不完整',
-        message: '当前还没有在设置页填写完整的百度图片翻译凭证，请先补全 AppID 和 AppKey。',
+        message: '当前还没有在设置页填写完整的百度图片翻译 V2 凭证，请同时补全 AppID 和 Access Token。',
         showRetry: true,
         showOpenSettings: true,
         showClose: true,

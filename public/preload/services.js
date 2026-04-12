@@ -22,8 +22,11 @@ const path = require('path')
 const UI_SETTINGS_KEY = 'screen-shot-translation-ui-settings'
 const PLUGIN_SETTINGS_KEY = 'screen-shot-translation-settings'
 const RUN_FEATURE_CODE = 'screen-shot-translation-run'
+const WORKFLOW_RESULT_EVENT = 'screen-shot-translation:workflow-result'
 
 let pendingPluginEnter = null
+let pendingWorkflowResult = null
+let runningPreloadWorkflow = false
 
 function loadElectronModule(explicitElectron) {
   if (explicitElectron && typeof explicitElectron === 'object') {
@@ -103,11 +106,23 @@ function handlePreloadPluginEnter(event = {}) {
     return
   }
 
-  try {
-    concealPluginWindow(window.utools)
-  } catch {
-    // 主窗口隐藏失败时继续交给后续流程兜底，这里不把入口事件放大成启动异常。
+  if (runningPreloadWorkflow) {
+    return
   }
+
+  pendingWorkflowResult = null
+  runningPreloadWorkflow = true
+
+  Promise.resolve(runCaptureTranslationPin())
+    .then((result) => {
+      if (result && result.ok === false) {
+        pendingWorkflowResult = result
+        emitWorkflowResult(result)
+      }
+    })
+    .finally(() => {
+      runningPreloadWorkflow = false
+    })
 }
 
 // 渲染层挂载后会主动消费一次 preload 缓存的进入事件，避免首个 run 入口时序丢失。
@@ -115,6 +130,26 @@ function consumePendingPluginEnter() {
   const nextEvent = pendingPluginEnter
   pendingPluginEnter = null
   return nextEvent
+}
+
+// run 入口失败时，渲染层要能直接消费 preload 已经拿到的失败结果。
+function consumePendingWorkflowResult() {
+  const nextResult = pendingWorkflowResult
+  pendingWorkflowResult = null
+  return nextResult
+}
+
+// preload 触发截图后，如果失败态需要结果页承载，就用自定义事件把结果同步给已挂载的渲染层。
+function emitWorkflowResult(result) {
+  if (typeof window?.dispatchEvent !== 'function' || typeof CustomEvent !== 'function') {
+    return
+  }
+
+  try {
+    window.dispatchEvent(new CustomEvent(WORKFLOW_RESULT_EVENT, { detail: result }))
+  } catch {
+    // 事件广播只是加速渲染层拿到失败结果，失败时继续保留 pending 缓存兜底。
+  }
 }
 
 // 渲染层每次读取 UI 设置时都先走归一化，保证主题和窗口高度字段始终完整。
@@ -340,15 +375,16 @@ function runCaptureTranslationPin() {
       dismissPluginWindowAfterSuccess(window.utools)
     }
 
-    if (result && result.ok === false) {
-      revealPluginWindow(window.utools)
-    }
-
     if (result && result.ok === false && result.code === 'translation-failed') {
+      revealPluginWindow(window.utools)
       return {
         ...result,
         translationDebug: getLastTranslationDebug(),
       }
+    }
+
+    if (result && result.ok === false) {
+      revealPluginWindow(window.utools)
     }
 
     return result
@@ -364,6 +400,7 @@ window.services = {
   ...(window.services || {}),
   concealPluginWindow,
   consumePendingPluginEnter,
+  consumePendingWorkflowResult,
   getUiSettings,
   saveUiSettings,
   getPluginSettings,

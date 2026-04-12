@@ -6,7 +6,7 @@ function normalizeTranslationCredentials(raw) {
 
   return {
     appId: typeof candidate.appId === 'string' ? candidate.appId.trim() : '',
-    appKey: typeof candidate.appKey === 'string' ? candidate.appKey.trim() : '',
+    accessToken: typeof candidate.accessToken === 'string' ? candidate.accessToken.trim() : '',
   }
 }
 
@@ -26,7 +26,7 @@ function saveTranslationCredentials(db, partial) {
   const patch = partial && typeof partial === 'object' ? partial : {}
   const next = {
     appId: typeof patch.appId === 'string' ? patch.appId.trim() : current.appId,
-    appKey: typeof patch.appKey === 'string' ? patch.appKey.trim() : current.appKey,
+    accessToken: typeof patch.accessToken === 'string' ? patch.accessToken.trim() : current.accessToken,
   }
 
   if (!db || typeof db.get !== 'function' || typeof db.put !== 'function') {

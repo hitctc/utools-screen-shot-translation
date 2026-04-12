@@ -51,7 +51,7 @@ body,
 body {
   margin: 0;
   color: var(--text-primary);
-  font-family: 'Space Grotesk', 'PingFang SC', 'Helvetica Neue', sans-serif;
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
   background:
     linear-gradient(90deg, transparent 0, transparent 31px, color-mix(in srgb, var(--border) 55%, transparent) 32px),
     linear-gradient(var(--bg), var(--bg));
@@ -84,7 +84,7 @@ select {
 .page-shell {
   width: min(100%, 1080px);
   margin: 0 auto;
-  padding: 14px 14px 24px;
+  padding: 10px 10px 18px;
 }
 
 .page-shell--home,
@@ -92,12 +92,12 @@ select {
 .page-shell--settings,
 .page-shell--result {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .page-shell--records,
 .page-shell--settings {
-  padding-bottom: 96px;
+  padding-bottom: 82px;
 }
 
 .hero-card,
@@ -116,14 +116,14 @@ select {
 .settings-card,
 .result-card,
 .settings-group {
-  padding: 16px;
+  padding: 13px;
 }
 
 .hero-card,
 .settings-card,
 .result-card {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .hero-card__eyebrow,
@@ -146,14 +146,14 @@ select {
 .empty-state h2 {
   margin: 0;
   color: var(--text-display);
-  font-family: 'Space Grotesk', 'PingFang SC', sans-serif;
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
 }
 
 .hero-card h1,
 .settings-card h1,
 .result-card h1 {
-  font-size: clamp(28px, 4.4vw, 40px);
-  line-height: 1.04;
+  font-size: clamp(26px, 4vw, 36px);
+  line-height: 1;
   font-weight: 500;
   letter-spacing: -0.03em;
 }
@@ -167,8 +167,8 @@ select {
 .empty-state__copy {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 15px;
-  line-height: 1.55;
+  font-size: 14px;
+  line-height: 1.45;
 }
 
 .hero-copy,
@@ -187,7 +187,7 @@ select {
 .record-card__action {
   margin: 0;
   color: var(--text-muted);
-  font-family: 'Space Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -199,7 +199,7 @@ select {
 .settings-fields,
 .settings-grid {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .step-grid {
@@ -218,12 +218,12 @@ select {
 }
 
 .settings-card--hero {
-  gap: 10px;
+  gap: 8px;
 }
 
 .settings-card__header {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .settings-grid {
@@ -236,7 +236,7 @@ select {
 }
 
 .group-title {
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1.12;
 }
 
@@ -244,8 +244,35 @@ select {
   margin-top: 0;
 }
 
+.resource-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.resource-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: border-color 0.18s ease, color 0.18s ease, background-color 0.18s ease;
+}
+
+.resource-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .state-card {
-  padding: 12px 14px;
+  padding: 10px 12px;
 }
 
 .state-card--error {
@@ -266,8 +293,8 @@ select {
 
 .empty-state {
   display: grid;
-  gap: 10px;
-  padding: 18px 16px;
+  gap: 8px;
+  padding: 14px 13px;
   border: 1px dashed var(--border-strong);
   border-radius: 16px;
   background: var(--surface-muted);
@@ -280,8 +307,8 @@ select {
 
 .records-toolbar {
   display: grid;
-  gap: 8px;
-  padding-top: 10px;
+  gap: 6px;
+  padding-top: 8px;
   border-top: 1px solid var(--border);
 }
 
@@ -291,7 +318,7 @@ select {
 
 .records-toolbar__count {
   color: var(--text-display);
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 500;
   letter-spacing: -0.02em;
 }
@@ -300,13 +327,22 @@ select {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .records-toolbar__density-label {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
+}
+
+.records-toolbar__density-value {
+  color: var(--text-muted);
+  font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .records-toolbar__slider,
@@ -317,17 +353,22 @@ select {
 }
 
 .records-grid {
-  column-count: 3;
-  column-gap: 12px;
-  column-fill: balance;
+  display: grid;
+  grid-template-columns: repeat(var(--records-column-count, 3), minmax(0, 1fr));
+  align-items: start;
+  gap: 10px;
+}
+
+.records-grid__column {
+  display: grid;
+  align-content: start;
+  gap: 10px;
 }
 
 .record-card {
-  break-inside: avoid;
   display: grid;
-  gap: 10px;
-  margin-bottom: 12px;
-  padding: 10px;
+  gap: 8px;
+  padding: 8px;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--surface);
@@ -336,21 +377,24 @@ select {
 .record-card__preview {
   position: relative;
   overflow: hidden;
-  display: block;
+  display: grid;
+  place-items: center;
   width: 100%;
-  min-height: 176px;
+  min-height: 164px;
   padding: 0;
   border: 0;
   border-radius: 12px;
-  background: var(--surface-muted);
+  background: color-mix(in srgb, var(--surface-muted) 92%, var(--bg));
 }
 
 .record-card__image {
   display: block;
   width: 100%;
-  min-height: 176px;
-  height: 100%;
-  object-fit: cover;
+  min-height: 164px;
+  max-height: 260px;
+  height: auto;
+  object-fit: contain;
+  object-position: center;
 }
 
 .record-card__overlay {
@@ -359,8 +403,8 @@ select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 6px;
+  padding: 7px 8px;
   background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.78) 100%);
   color: #ffffff;
 }
@@ -373,53 +417,103 @@ select {
 .record-card__meta {
   display: flex;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   color: var(--text-secondary);
-  font-family: 'Space Mono', monospace;
-  font-size: 12px;
+  font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
 }
 
 .record-card__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .records-floating-action,
 .settings-floating-action {
   position: fixed;
-  right: 22px;
-  bottom: 18px;
+  right: 18px;
+  bottom: 14px;
   z-index: 20;
 }
 
 .records-floating-action__button,
 .settings-floating-action__button {
-  min-width: 92px;
-  min-height: 46px;
+  min-width: 84px;
+  min-height: 42px;
   border-radius: 999px;
 }
 
 .status-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
-  padding: 0 10px;
+  min-height: 24px;
+  padding: 0 8px;
   border: 1px solid var(--border-strong);
   border-radius: 999px;
   background: transparent;
   color: var(--text-secondary);
-  font-family: 'Space Mono', monospace;
-  font-size: 11px;
+  font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
   letter-spacing: 0.06em;
   white-space: nowrap;
+}
+
+.info-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+
+.info-strip::before {
+  content: '';
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 4px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.info-strip__label,
+.info-strip__value {
+  display: inline;
+}
+
+.info-strip__label {
+  color: var(--text-muted);
+  font-family: 'Space Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.info-strip__value {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.info-strip__label::after {
+  content: '·';
+  margin-left: 6px;
+  color: var(--text-muted);
 }
 
 .primary-button,
 .secondary-button,
 .choice-button,
 .field__control {
-  min-height: 42px;
+  min-height: 38px;
   border: 1px solid var(--border-strong);
   border-radius: 12px;
   transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
@@ -428,7 +522,7 @@ select {
 .primary-button,
 .secondary-button,
 .choice-button {
-  padding: 0 14px;
+  padding: 0 12px;
 }
 
 .primary-button {
@@ -445,10 +539,10 @@ select {
 }
 
 .secondary-button--compact {
-  min-height: 34px;
-  padding-inline: 12px;
+  min-height: 32px;
+  padding-inline: 10px;
   border-radius: 999px;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .secondary-button--danger {
@@ -477,7 +571,7 @@ select {
 .actions-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .actions-row--settings,
@@ -487,7 +581,7 @@ select {
 
 .field {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .field--inline {
@@ -499,13 +593,13 @@ select {
 
 .field__label {
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
 }
 
 .field__control {
   width: 100%;
-  padding: 0 12px;
+  padding: 0 10px;
   outline: 0;
 }
 
@@ -516,7 +610,7 @@ select {
 .choice-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .choice-button {
@@ -530,8 +624,8 @@ select {
 
 .range-meta {
   color: var(--text-muted);
-  font-family: 'Space Mono', monospace;
-  font-size: 12px;
+  font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
 }
 
 @media (max-width: 920px) {
@@ -551,10 +645,6 @@ select {
     grid-template-columns: 1fr;
   }
 
-  .records-grid {
-    column-count: 1;
-  }
-
   .records-toolbar__density {
     grid-template-columns: 1fr;
     align-items: start;
@@ -562,8 +652,8 @@ select {
 
   .records-floating-action,
   .settings-floating-action {
-    right: 14px;
-    bottom: 14px;
+    right: 12px;
+    bottom: 12px;
   }
 
   .records-floating-action__button,
@@ -573,7 +663,7 @@ select {
   }
 
   .page-shell {
-    padding-inline: 10px;
+    padding-inline: 8px;
   }
 
   .hero-card,
@@ -581,6 +671,6 @@ select {
   .settings-card,
   .result-card,
   .settings-group {
-    padding: 14px;
+    padding: 12px;
   }
 }

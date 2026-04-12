@@ -13,7 +13,7 @@
         overflow: hidden;
         cursor: crosshair;
         user-select: none;
-        background: #111;
+        background: transparent;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
 
@@ -21,9 +21,16 @@
         position: relative;
         width: 100%;
         height: 100%;
-        background-position: center;
-        background-repeat: no-repeat;
-        background-size: 100% 100%;
+        background: #050505;
+      }
+
+      #snapshot {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: fill;
+        pointer-events: none;
       }
 
       #shade {
@@ -35,7 +42,7 @@
       #selection {
         position: absolute;
         border: 2px solid rgba(255, 255, 255, 0.92);
-        background: rgba(255, 255, 255, 0.08);
+        background: transparent;
         box-shadow: 0 0 0 99999px rgba(0, 0, 0, 0.28);
         display: none;
       }
@@ -55,18 +62,23 @@
   </head>
   <body>
     <div id="root">
+      <img id="snapshot" alt="" />
       <div id="shade"></div>
       <div id="selection"></div>
       <div id="hint">拖拽选择截图区域，按 Esc 取消</div>
     </div>
     <script>
       const root = document.getElementById('root')
+      const snapshotElement = document.getElementById('snapshot')
+      const shadeElement = document.getElementById('shade')
       const selectionElement = document.getElementById('selection')
+      const cropCanvas = document.createElement('canvas')
       let captureChannel = ''
       let displayBounds = { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }
-      let screenshotImage = null
       let dragging = false
       let dragStart = null
+      let submitting = false
+      let snapshotReady = Promise.resolve()
 
       function sendToParent(payload) {
         if (!captureChannel || !window.utools || typeof window.utools.sendToParent !== 'function') {
@@ -93,22 +105,11 @@
       function renderSelection(rect) {
         const nextRect = clampRect(rect)
         selectionElement.style.display = nextRect.width > 0 && nextRect.height > 0 ? 'block' : 'none'
+        shadeElement.style.display = nextRect.width > 0 && nextRect.height > 0 ? 'none' : 'block'
         selectionElement.style.left = `${nextRect.x}px`
         selectionElement.style.top = `${nextRect.y}px`
         selectionElement.style.width = `${nextRect.width}px`
         selectionElement.style.height = `${nextRect.height}px`
-      }
-
-      async function captureDisplayImage(dataUrl) {
-        if (typeof dataUrl !== 'string' || !dataUrl.trim()) {
-          throw new Error('display-source-missing')
-        }
-
-        const image = new Image()
-        image.src = dataUrl
-        await image.decode()
-        root.style.backgroundImage = `url("${dataUrl}")`
-        screenshotImage = image
       }
 
       function buildSelectionRect(event) {
@@ -120,49 +121,86 @@
         })
       }
 
-      function submitSelection(rect) {
-        if (!screenshotImage || !rect || rect.width < 4 || rect.height < 4) {
+      async function cropSelectionImage(rect) {
+        const nextRect = clampRect(rect)
+        if (nextRect.width < 4 || nextRect.height < 4) {
+          return ''
+        }
+
+        try {
+          await snapshotReady
+        } catch {
+          return ''
+        }
+        const naturalWidth = Number(snapshotElement.naturalWidth)
+        const naturalHeight = Number(snapshotElement.naturalHeight)
+
+        if (!Number.isFinite(naturalWidth) || !Number.isFinite(naturalHeight) || naturalWidth <= 0 || naturalHeight <= 0) {
+          return ''
+        }
+
+        const scaleX = naturalWidth / Math.max(1, window.innerWidth)
+        const scaleY = naturalHeight / Math.max(1, window.innerHeight)
+        const sourceX = Math.max(0, Math.round(nextRect.x * scaleX))
+        const sourceY = Math.max(0, Math.round(nextRect.y * scaleY))
+        const sourceWidth = Math.max(1, Math.round(nextRect.width * scaleX))
+        const sourceHeight = Math.max(1, Math.round(nextRect.height * scaleY))
+        const context = cropCanvas.getContext('2d')
+
+        if (!context) {
+          return ''
+        }
+
+        cropCanvas.width = sourceWidth
+        cropCanvas.height = sourceHeight
+        context.clearRect(0, 0, sourceWidth, sourceHeight)
+        context.drawImage(
+          snapshotElement,
+          sourceX,
+          sourceY,
+          sourceWidth,
+          sourceHeight,
+          0,
+          0,
+          sourceWidth,
+          sourceHeight,
+        )
+
+        return cropCanvas.toDataURL('image/png')
+      }
+
+      async function submitSelection(rect) {
+        if (!rect || rect.width < 4 || rect.height < 4) {
           return
         }
 
-        const scaleX = screenshotImage.naturalWidth / window.innerWidth
-        const scaleY = screenshotImage.naturalHeight / window.innerHeight
-        const canvas = document.createElement('canvas')
-        canvas.width = Math.max(1, Math.round(rect.width * scaleX))
-        canvas.height = Math.max(1, Math.round(rect.height * scaleY))
-        const context = canvas.getContext('2d')
+        if (submitting) {
+          return
+        }
 
-        if (!context) {
+        submitting = true
+        const image = await cropSelectionImage(rect)
+
+        if (!image) {
+          submitting = false
           sendToParent({ type: 'cancel' })
           return
         }
 
-        context.drawImage(
-          screenshotImage,
-          Math.round(rect.x * scaleX),
-          Math.round(rect.y * scaleY),
-          Math.round(rect.width * scaleX),
-          Math.round(rect.height * scaleY),
-          0,
-          0,
-          canvas.width,
-          canvas.height,
-        )
-
         sendToParent({
           type: 'submit',
-          image: canvas.toDataURL('image/png'),
           bounds: {
             x: displayBounds.x + rect.x,
             y: displayBounds.y + rect.y,
             width: rect.width,
             height: rect.height,
           },
+          image,
         })
       }
 
       root.addEventListener('mousedown', (event) => {
-        if (event.button !== 0 || !screenshotImage) {
+        if (event.button !== 0) {
           return
         }
 
@@ -187,7 +225,7 @@
         dragging = false
         const rect = buildSelectionRect(event)
         dragStart = null
-        submitSelection(rect)
+        void submitSelection(rect)
       })
 
       window.addEventListener('keydown', (event) => {
@@ -199,12 +237,19 @@
       window.__SCREEN_TRANSLATION_CAPTURE_INIT__ = async function initCaptureOverlay(payload) {
         captureChannel = payload && typeof payload.channel === 'string' ? payload.channel : ''
         displayBounds = payload && payload.displayBounds ? payload.displayBounds : displayBounds
+        const imageDataUrl = payload && typeof payload.imageDataUrl === 'string' ? payload.imageDataUrl.trim() : ''
 
-        try {
-          await captureDisplayImage(payload && payload.imageDataUrl)
-        } catch {
-          sendToParent({ type: 'cancel' })
+        snapshotReady = new Promise((resolve, reject) => {
+          snapshotElement.onload = () => resolve()
+          snapshotElement.onerror = () => reject(new Error('snapshot-load-failed'))
+        })
+
+        if (!imageDataUrl) {
+          snapshotReady = Promise.reject(new Error('missing-snapshot-image'))
+          return
         }
+
+        snapshotElement.src = imageDataUrl
       }
     </script>
   </body>
