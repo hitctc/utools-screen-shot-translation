@@ -235,7 +235,7 @@ function openPanelWindow({ view, result } = {}, runtime = window.utools) {
   const nextWindow = runtime.createBrowserWindow(
     `${PANEL_HTML_PATH}?view=${encodeURIComponent(normalizedView)}`,
     {
-      title: '截屏翻译并钉图',
+      title: '截屏翻译钉图',
       width: 1120,
       height: getUiSettings().windowHeight,
       minWidth: 760,
