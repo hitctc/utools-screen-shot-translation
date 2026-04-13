@@ -17,3 +17,9 @@ test('panel.html does not reference remote js or css resources', () => {
 test('public root no longer exposes index.html as a panel shell', () => {
   assert.equal(fs.existsSync(indexHtmlPath), false)
 })
+
+test('panel.html loads the local panel state helper before the jQuery app shell', () => {
+  assert.match(panelHtmlSource, /<script src="\.\/vendor\/jquery-3\.7\.1\.min\.js"><\/script>/)
+  assert.match(panelHtmlSource, /<script src="\.\/panel-state\.js"><\/script>/)
+  assert.match(panelHtmlSource, /<script src="\.\/app\.js"><\/script>/)
+})

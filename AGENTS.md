@@ -49,7 +49,7 @@
   - 支持在系统主题变化时同步刷新页面主题和状态文案
   - 支持通过 `dbStorage` 持久化 UI 设置和插件设置
   - 支持调整主插件窗口高度，并在重新进入插件时恢复
-  - `public/panel.html + public/app.js + public/app.css` 已接管 `钉住记录 / 设置 / 失败结果` 的运行壳
+  - `public/panel.html + public/app.js + public/app.css + public/panel-state.js` 已接管 `钉住记录 / 设置 / 失败结果` 的运行壳
   - 插件设置模型已切到 `translationMode / saveTranslatedImage / saveDirectory / confirmBeforeDelete`，`preload` 侧已完成归一化和测试收口
   - `public/preload/recordStore.cjs` 已接通保存目录总清单的读取、整理、保存、删除和最后钉住位置更新
   - `public/preload/baiduPictureTranslate.cjs` 已接通百度图片翻译请求发送、自动方向选择，以及 `V2` 块级回填优先的本地拼图
@@ -63,17 +63,17 @@
   - 当前主流程截图统一走 `utools.screenCapture(callback)`，因此暂不支持“按截图原位置钉回”
   - 首次钉图默认落到当前屏幕右上角；只有记录重钉时才优先回到上次保存的位置
   - “当前哪些图片已钉住”只保存在插件进程内存里；插件进程结束后，只保留 manifest 中的最后位置
-- 当前技术栈：运行时已切到 `静态 HTML + jQuery + preload + Node built-in node:test`；旧 `Vue / Vite` 代码仍保留在仓库里，但先冻结，不再参与当前运行路径
+- 当前技术栈：运行时已切到 `静态 HTML + jQuery + preload + Node built-in node:test`；旧 `Vue / Vite` 代码已从仓库主线清理，不再保留双轨运行壳
 - 当前视觉基线：Nothing 风格中文桌面工具表达，深色优先、浅色同步，主题强调色固定为 `#d71921`
 - 当前界面字体：`Doto / Space Grotesk / Space Mono`
 - 当前运行模型：
   - `screen-shot-translation-run / records / settings` 三个入口都由 `public/preload/services.js` 里的 `window.exports[feature].mode = 'none'` 接管
   - `screen-shot-translation-run` 直接在 preload 启动主流程，不再经过页面壳
   - `screen-shot-translation-records / settings` 会通过 `utools.createBrowserWindow('panel.html?...')` 打开静态面板窗口
-  - `public/panel.html + public/app.js` 只负责 `records / settings / result` 的最小 UI 承载
+  - `public/panel.html + public/app.js + public/panel-state.js` 只负责 `records / settings / result` 的静态 UI 承载
   - `public/preload/services.js` 通过 `window.services` 暴露当前正式保留的设置、记录、目录选择和主流程桥接能力
   - `public/preload/localState.cjs` 负责 UI 设置和插件设置的归一化
-  - 旧 `src/` 下的 Vue 页面与 `vite.config.js` 已冻结，不应再当成当前运行事实描述
+  - 不再保留旧 `src/` 和 `vite.config.js`，后续协作不要再按 Vue/Vite 双轨模型理解当前仓库
 
 当前仓库已经进入真实“截屏 -> 翻译 -> 钉住”闭环阶段，但多屏选区、进程外钉住状态恢复这些增强能力仍未完成。不要把这些增强项误说成已支持。
 当前界面不要再往玻璃拟态、厚阴影或大渐变方向扩散；样式层级优先靠排版、边框和间距控制。
@@ -108,8 +108,6 @@
   负责真实钉住窗口的创建、拖动、缩放、重复钉住前台提醒，以及 `lastPinBounds` 的持续回写。
 - `public/preload/workflow.cjs`
   负责主流程 `capture -> translate -> pin -> save` 的失败归因和统一返回契约，当前会透传步骤返回的明确失败码。
-- `src/`
-  旧的 Vue/Vite 前端壳，当前迁移期先冻结保留，不再参与实际运行路径；除非后续明确清理迁移债务，否则不要继续在这里加新运行逻辑。
 - `tests/preload/localState.test.mjs`
   负责当前 `preload` 正式保留的设置归一化与读写合并语义测试，包括目录选择、同步凭证桥接、官方截图桥接、真实重钉桥接和局部更新持久化。
 - `tests/preload/translationCredentialStore.test.mjs`
@@ -120,14 +118,8 @@
   负责主流程编排、失败归因和 `capture -> translate -> pin -> save` 参数传递测试。
 - `tests/preload/theme.test.mjs`
   负责主题模式解析、状态文案和系统主题响应式同步测试。
-- `tests/preload/bootShell.test.mjs`
-  负责静态启动壳移除逻辑的最小单测。
-- `tests/pluginSettings.test.mjs`
-  负责前端侧插件设置归一化和保存目录警告文案的最小契约测试。
-- `tests/viewState.test.mjs`
-  负责未知失败码兜底、记录卡片时间容错和本地文件路径归一化测试。
-- `vite.config.js`
-  旧 Vite 配置，当前已冻结，不再参与实际构建。
+- `tests/panelState.test.mjs`
+  负责静态面板状态辅助函数的最小单测，包括设置归一化、失败文案映射、记录映射和列分配。
 - `dist/`
   构建产物目录；`npm run build` 后会把 `public/` 直接同步到 `dist/`，供 uTools 实际加载。
 - `scripts/build-static-plugin.mjs`
@@ -198,7 +190,7 @@
 11. 确认 `设置` 页面可以返回记录页，且保存目录按钮、保存开关、删除确认开关都可操作
 12. 在设置页切换主题模式，确认记录页和结果页状态标签与根节点主题同步更新
 13. 在设置页拖动窗口高度，确认窗口高度立即变化；关闭并重新进入插件后，确认仍保持为上次保存值
-14. 每次进入 `钉住记录 / 设置 / 结果页` 时，确认看到的是 `public/panel.html` 承载的静态面板，而不是旧的 Vue 页面壳
+14. 每次进入 `钉住记录 / 设置 / 结果页` 时，确认看到的是 `public/panel.html` 承载的静态面板，而不是任何旧页面壳
 
 当前项目的构建预览方式：
 
@@ -311,6 +303,5 @@
   - 真实 OCR
   - 按截图原位置钉回
   - 已钉住状态的跨进程恢复
-  - 对旧 Vue/Vite 冻结代码的彻底清理
 
 后续协作者如果继续推进功能，默认应从“如何在保持主路径简洁的前提下增强截图能力”和“当前已钉住状态如何跨进程恢复”这两条主线思考，而不是再把主流程重新拉回冗余分支。
