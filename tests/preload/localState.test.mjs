@@ -15,12 +15,12 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
   const servicesModulePath = path.resolve('public/preload/services.js')
   const baiduPictureTranslateModulePath = path.resolve('public/preload/baiduPictureTranslate.cjs')
   const credentialStoreModulePath = path.resolve('public/preload/translationCredentialStore.cjs')
-  const pinWindowManagerModulePath = path.resolve('public/preload/pinWindowManager.cjs')
+  const pegImageWindowManagerModulePath = path.resolve('public/preload/pegImageWindowManager.cjs')
   const recordStoreModulePath = path.resolve('public/preload/recordStore.cjs')
   delete require.cache[servicesModulePath]
   delete require.cache[baiduPictureTranslateModulePath]
   delete require.cache[credentialStoreModulePath]
-  delete require.cache[pinWindowManagerModulePath]
+  delete require.cache[pegImageWindowManagerModulePath]
   delete require.cache[recordStoreModulePath]
 
   if (Object.prototype.hasOwnProperty.call(options, 'baiduPictureTranslateModule')) {
@@ -32,12 +32,12 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
     }
   }
 
-  if (Object.prototype.hasOwnProperty.call(options, 'pinWindowManagerModule')) {
-    require.cache[pinWindowManagerModulePath] = {
-      id: pinWindowManagerModulePath,
-      filename: pinWindowManagerModulePath,
+  if (Object.prototype.hasOwnProperty.call(options, 'pegImageWindowManagerModule')) {
+    require.cache[pegImageWindowManagerModulePath] = {
+      id: pegImageWindowManagerModulePath,
+      filename: pegImageWindowManagerModulePath,
       loaded: true,
-      exports: options.pinWindowManagerModule,
+      exports: options.pegImageWindowManagerModule,
     }
   }
 
@@ -147,7 +147,7 @@ function loadServicesWithStorage(initialStorage = {}, options = {}) {
       delete require.cache[servicesModulePath]
       delete require.cache[baiduPictureTranslateModulePath]
       delete require.cache[credentialStoreModulePath]
-      delete require.cache[pinWindowManagerModulePath]
+      delete require.cache[pegImageWindowManagerModulePath]
       delete require.cache[recordStoreModulePath]
     },
   }
@@ -167,7 +167,7 @@ test('normalizeUiSettings keeps supported theme modes and clamps window height',
     {
       themeMode: 'dark',
       windowHeight: 480,
-      recordsColumnCount: 6,
+      recordsColumnCount: 5,
     },
   )
 
@@ -240,7 +240,7 @@ test('services exposes the settings and official screenshot bridge', () => {
     'openSaveDirectory',
     'openSettingsWindow',
     'pickSaveDirectory',
-    'repinSavedRecord',
+    'repegSavedRecord',
     'runCaptureTranslationPin',
     'savePluginSettings',
     'saveTranslationCredentials',
@@ -253,12 +253,12 @@ test('services exposes the settings and official screenshot bridge', () => {
 test('三个 feature 都通过 window.exports 以无 UI 模式暴露', () => {
   const { cleanup } = loadServicesWithStorage()
 
-  assert.equal(global.window.exports['screen-shot-translation-run']?.mode, 'none')
+  assert.equal(global.window.exports['screen-shot-translation-peg-run']?.mode, 'none')
   assert.equal(
-    typeof global.window.exports['screen-shot-translation-run']?.args?.enter,
+    typeof global.window.exports['screen-shot-translation-peg-run']?.args?.enter,
     'function',
   )
-  assert.equal(global.window.exports['screen-shot-translation-records']?.mode, 'none')
+  assert.equal(global.window.exports['screen-shot-translation-peg-records']?.mode, 'none')
   assert.equal(global.window.exports['screen-shot-translation-settings']?.mode, 'none')
 
   cleanup()
@@ -282,7 +282,7 @@ test('run feature handler 会直接启动官方截图', async () => {
     },
   )
 
-  global.window.exports['screen-shot-translation-run'].args.enter()
+  global.window.exports['screen-shot-translation-peg-run'].args.enter()
   await new Promise((resolve) => setImmediate(resolve))
 
   assert.equal(screenCaptureCalls, 1)
@@ -310,7 +310,7 @@ test('run feature 失败时会打开结果面板窗口，而不是回到主窗�
     },
   )
 
-  global.window.exports['screen-shot-translation-run'].args.enter()
+  global.window.exports['screen-shot-translation-peg-run'].args.enter()
   await new Promise((resolve) => setImmediate(resolve))
 
   assert.equal(screenCaptureCalls, 1)
@@ -323,7 +323,7 @@ test('run feature 失败时会打开结果面板窗口，而不是回到主窗�
 test('records 和 settings feature 会复用同一个自定义面板窗口', () => {
   const { getBrowserWindows, cleanup } = loadServicesWithStorage()
 
-  global.window.exports['screen-shot-translation-records'].args.enter()
+  global.window.exports['screen-shot-translation-peg-records'].args.enter()
   global.window.exports['screen-shot-translation-settings'].args.enter()
 
   assert.equal(getBrowserWindows()[0].url, 'panel.html?view=records')
@@ -374,8 +374,8 @@ test('run feature 启动前会先关闭已经打开的面板窗口，避免被�
     },
   )
 
-  global.window.exports['screen-shot-translation-records'].args.enter()
-  global.window.exports['screen-shot-translation-run'].args.enter()
+  global.window.exports['screen-shot-translation-peg-records'].args.enter()
+  global.window.exports['screen-shot-translation-peg-run'].args.enter()
   await new Promise((resolve) => setImmediate(resolve))
 
   assert.equal(screenCaptureCalls, 1)
@@ -562,7 +562,7 @@ test('openSaveDirectory shows a notification when every open strategy is unavail
   cleanup()
 })
 
-test('repinSavedRecord keeps a bridge failure code from the pin manager', async () => {
+test('repegSavedRecord keeps a bridge failure code from the peg manager', async () => {
   const { services, cleanup } = loadServicesWithStorage(
     {
       'screen-shot-translation-settings': {
@@ -577,22 +577,22 @@ test('repinSavedRecord keeps a bridge failure code from the pin manager', async 
         getSavedRecord: async () => ({
           id: 'record-1',
           imageFilename: 'translated.png',
-          lastPinBounds: { x: 10, y: 20, width: 120, height: 90 },
+          lastPegBounds: { x: 10, y: 20, width: 120, height: 90 },
         }),
         listSavedRecords: async () => ({ records: [] }),
         deleteSavedRecord: async () => ({ records: [] }),
         saveTranslatedRecord: async () => null,
-        updateSavedRecordPinState: async () => null,
+        updateSavedRecordPegState: async () => null,
       },
-      pinWindowManagerModule: {
-        repinSavedRecordImage: async () => ({ ok: false, code: 'repin-failed' }),
+      pegImageWindowManagerModule: {
+        repegSavedRecordImage: async () => ({ ok: false, code: 'repeg-failed' }),
       },
     },
   )
 
-  assert.deepEqual(await services.repinSavedRecord('record-1'), {
+  assert.deepEqual(await services.repegSavedRecord('record-1'), {
     ok: false,
-    code: 'repin-failed',
+    code: 'repeg-failed',
   })
 
   cleanup()
@@ -633,7 +633,7 @@ test('saveUiSettings merges partial updates with the persisted ui settings', () 
   assert.deepEqual(result, {
     themeMode: 'light',
     windowHeight: 480,
-    recordsColumnCount: 6,
+    recordsColumnCount: 5,
   })
   assert.deepEqual(storage.get('screen-shot-translation-ui-settings'), result)
 
@@ -829,7 +829,7 @@ test('runCaptureTranslationPin returns save-config-invalid when the persisted sa
   cleanup()
 })
 
-test('repinSavedRecord keeps already pinned requests on the happy path', async () => {
+test('repegSavedRecord keeps already pegged requests on the happy path', async () => {
   const { services, notifications, cleanup } = loadServicesWithStorage(
     {
       'screen-shot-translation-settings': {
@@ -844,29 +844,29 @@ test('repinSavedRecord keeps already pinned requests on the happy path', async (
         getSavedRecord: async () => ({
           id: 'record-1',
           imageFilename: 'translated.png',
-          lastPinBounds: { x: 10, y: 20, width: 120, height: 90 },
+          lastPegBounds: { x: 10, y: 20, width: 120, height: 90 },
         }),
         listSavedRecords: async () => ({ records: [] }),
         deleteSavedRecord: async () => ({ records: [] }),
         saveTranslatedRecord: async () => null,
-        updateSavedRecordPinState: async () => null,
+        updateSavedRecordPegState: async () => null,
       },
-      pinWindowManagerModule: {
-        repinSavedRecordImage: async () => ({ ok: true, code: 'already-pinned' }),
+      pegImageWindowManagerModule: {
+        repegSavedRecordImage: async () => ({ ok: true, code: 'already-pegged' }),
       },
     },
   )
 
-  assert.deepEqual(await services.repinSavedRecord('record-1'), {
+  assert.deepEqual(await services.repegSavedRecord('record-1'), {
     ok: true,
-    code: 'already-pinned',
+    code: 'already-pegged',
   })
   assert.deepEqual(notifications, [])
 
   cleanup()
 })
 
-test('repinSavedRecord loads the saved png as a data url before handing it to the pin window', async () => {
+test('repegSavedRecord loads the saved png as a data url before handing it to the peg window', async () => {
   const fs = require('fs')
   const originalReadFile = fs.promises.readFile
   let receivedImageSrc = ''
@@ -891,23 +891,23 @@ test('repinSavedRecord loads the saved png as a data url before handing it to th
         getSavedRecord: async () => ({
           id: 'record-1',
           imageFilename: 'translated.png',
-          lastPinBounds: { x: 10, y: 20, width: 120, height: 90 },
+          lastPegBounds: { x: 10, y: 20, width: 120, height: 90 },
         }),
         listSavedRecords: async () => ({ records: [] }),
         deleteSavedRecord: async () => ({ records: [] }),
         saveTranslatedRecord: async () => null,
-        updateSavedRecordPinState: async () => null,
+        updateSavedRecordPegState: async () => null,
       },
-      pinWindowManagerModule: {
-        repinSavedRecordImage: async ({ imageSrc }) => {
+      pegImageWindowManagerModule: {
+        repegSavedRecordImage: async ({ imageSrc }) => {
           receivedImageSrc = imageSrc
-          return { ok: true, code: 'already-pinned' }
+          return { ok: true, code: 'already-pegged' }
         },
       },
     },
   )
 
-  await services.repinSavedRecord('record-1')
+  await services.repegSavedRecord('record-1')
 
   assert.equal(receivedImageSrc, `data:image/jpeg;base64,${jpegBuffer.toString('base64')}`)
 
@@ -943,8 +943,8 @@ test('runCaptureTranslationPin starts the workflow after the official screenCapt
         },
         getLastTranslationDebug: () => null,
       },
-      pinWindowManagerModule: {
-        pinTranslatedImage: async () => ({
+      pegImageWindowManagerModule: {
+        pegTranslatedImage: async () => ({
           ok: true,
           code: 'success',
           windowId: 99,

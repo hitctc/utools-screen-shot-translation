@@ -16,7 +16,7 @@ function createWorkflowDeps(overrides = {}) {
     },
     captureImage: async () => ({ ok: true, image: 'data:image/png;base64,captured' }),
     translateImage: async () => ({ ok: true, text: 'translated text' }),
-    pinImage: async () => ({ ok: true, bounds: { left: 10, top: 20, right: 30, bottom: 40 } }),
+    pegImage: async () => ({ ok: true, bounds: { left: 10, top: 20, right: 30, bottom: 40 } }),
     saveImage: async () => ({ ok: true, recordId: 'record-1' }),
     ...overrides,
   }
@@ -68,13 +68,13 @@ test('runMainWorkflow returns capture-cancelled when capture is cancelled', asyn
 })
 
 test('runMainWorkflow returns translation-failed when translation fails', async () => {
-  let pinCalls = 0
+  let pegCalls = 0
 
   const result = await runMainWorkflow({
     ...createWorkflowDeps({
       translateImage: async () => ({ ok: false, code: 'translation-failed' }),
-      pinImage: async () => {
-        pinCalls += 1
+      pegImage: async () => {
+        pegCalls += 1
         return { ok: true }
       },
     }),
@@ -84,7 +84,7 @@ test('runMainWorkflow returns translation-failed when translation fails', async 
     ok: false,
     code: 'translation-failed',
   })
-  assert.equal(pinCalls, 0)
+  assert.equal(pegCalls, 0)
 })
 
 test('runMainWorkflow keeps explicit translation failure codes from the translate step', async () => {
@@ -115,12 +115,12 @@ test('runMainWorkflow returns translation-failed when translation throws', async
   })
 })
 
-test('runMainWorkflow returns pin-failed when pinning fails', async () => {
+test('runMainWorkflow returns peg-failed when pegging fails', async () => {
   let saveCalls = 0
 
   const result = await runMainWorkflow({
     ...createWorkflowDeps({
-      pinImage: async () => ({ ok: false, code: 'pin-failed' }),
+      pegImage: async () => ({ ok: false, code: 'peg-failed' }),
       saveImage: async () => {
         saveCalls += 1
         return { ok: true }
@@ -130,23 +130,23 @@ test('runMainWorkflow returns pin-failed when pinning fails', async () => {
 
   assert.deepEqual(result, {
     ok: false,
-    code: 'pin-failed',
+    code: 'peg-failed',
   })
   assert.equal(saveCalls, 0)
 })
 
-test('runMainWorkflow returns pin-failed when pinning throws', async () => {
+test('runMainWorkflow returns peg-failed when pegging throws', async () => {
   const result = await runMainWorkflow({
     ...createWorkflowDeps({
-      pinImage: async () => {
-        throw new Error('pin window creation failed')
+      pegImage: async () => {
+        throw new Error('peg window creation failed')
       },
     }),
   })
 
   assert.deepEqual(result, {
     ok: false,
-    code: 'pin-failed',
+    code: 'peg-failed',
   })
 })
 
@@ -231,16 +231,16 @@ test('runMainWorkflow returns success when capture only carries an image and dow
         image: 'data:image/png;base64,captured',
       }),
       translateImage: async () => ({ ok: true, text: 'translated text', provider: 'stub' }),
-      pinImage: async (translationResult, captureResult) => {
-        calls.push({ step: 'pin', translationResult, captureResult })
+      pegImage: async (translationResult, captureResult) => {
+        calls.push({ step: 'peg', translationResult, captureResult })
         return {
           ok: true,
           bounds: { left: 100, top: 24, right: 340, bottom: 144 },
-          windowId: 'pin-1',
+          windowId: 'peg-1',
         }
       },
-      saveImage: async (translationResult, pinResult) => {
-        calls.push({ step: 'save', translationResult, pinResult })
+      saveImage: async (translationResult, pegResult) => {
+        calls.push({ step: 'save', translationResult, pegResult })
         return {
           ok: true,
           recordId: 'record-1',
@@ -255,17 +255,17 @@ test('runMainWorkflow returns success when capture only carries an image and dow
   })
   assert.deepEqual(calls, [
     {
-      step: 'pin',
+      step: 'peg',
       translationResult: { ok: true, text: 'translated text', provider: 'stub' },
       captureResult: { ok: true, image: 'data:image/png;base64,captured' },
     },
     {
       step: 'save',
       translationResult: { ok: true, text: 'translated text', provider: 'stub' },
-      pinResult: {
+      pegResult: {
         ok: true,
         bounds: { left: 100, top: 24, right: 340, bottom: 144 },
-        windowId: 'pin-1',
+        windowId: 'peg-1',
       },
     },
   ])

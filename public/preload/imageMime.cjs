@@ -22,7 +22,7 @@ function detectImageMimeTypeFromBuffer(buffer) {
   return 'image/png'
 }
 
-// data url 会继续喂给 pin window 的 canvas，这里必须带上和真实字节一致的 mime。
+// data url 会继续喂给 peg window 的 canvas，这里必须带上和真实字节一致的 mime。
 function buildImageDataUrlFromBuffer(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     return ''

@@ -15,8 +15,8 @@ function getEmptyRecordManifest() {
   }
 }
 
-// 钉住位置只接受完整的有限数值，避免把窗口脏态写进 manifest。
-function normalizePinBounds(bounds) {
+// 钉图位置只接受完整的有限数值，避免把窗口脏态写进 manifest。
+function normalizePegBounds(bounds) {
   const candidate = bounds && typeof bounds === 'object' ? bounds : {}
   const x = Math.round(Number(candidate.x))
   const y = Math.round(Number(candidate.y))
@@ -239,7 +239,7 @@ async function deleteSavedRecord({ fs, path, settings, recordId }) {
   })
 }
 
-// 记录页和重钉桥接都需要按 id 取单条记录，这里统一复用清理后的 manifest 结果。
+// 记录页和重钉图桥接都需要按 id 取单条记录，这里统一复用清理后的 manifest 结果。
 async function getSavedRecord({ fs, path, settings, recordId }) {
   if (!recordId || typeof recordId !== 'string') {
     return null
@@ -260,7 +260,7 @@ async function saveTranslatedRecord({
   now = () => new Date(),
 }) {
   const directoryPath = settings && typeof settings.saveDirectory === 'string' ? settings.saveDirectory.trim() : ''
-  const normalizedBounds = normalizePinBounds(bounds)
+  const normalizedBounds = normalizePegBounds(bounds)
   const imageBase64 =
     translationResult && typeof translationResult.translatedImageBase64 === 'string'
       ? translationResult.translatedImageBase64.trim()
@@ -280,8 +280,8 @@ async function saveTranslatedRecord({
     id: recordId,
     imageFilename,
     createdAt,
-    lastPinnedAt: createdAt,
-    lastPinBounds: normalizedBounds,
+    lastPeggedAt: createdAt,
+    lastPegBounds: normalizedBounds,
   }
 
   await fs.promises.writeFile(imagePath, imageBuffer)
@@ -301,8 +301,8 @@ async function saveTranslatedRecord({
   }
 }
 
-// 钉住窗口拖动或关闭后，只更新最后一次成功存在的位置，不改动创建时间和图片文件。
-async function updateSavedRecordPinState({
+// 钉图窗口拖动或关闭后，只更新最后一次成功存在的位置，不改动创建时间和图片文件。
+async function updateSavedRecordPegState({
   fs,
   path,
   settings,
@@ -311,7 +311,7 @@ async function updateSavedRecordPinState({
   now = () => new Date(),
 }) {
   const directoryPath = settings && typeof settings.saveDirectory === 'string' ? settings.saveDirectory.trim() : ''
-  const normalizedBounds = normalizePinBounds(bounds)
+  const normalizedBounds = normalizePegBounds(bounds)
 
   if (!recordId || !hasUsableSaveDirectory({ fs, directoryPath }) || !normalizedBounds) {
     return null
@@ -326,8 +326,8 @@ async function updateSavedRecordPinState({
 
     updatedRecord = {
       ...record,
-      lastPinnedAt: now().toISOString(),
-      lastPinBounds: normalizedBounds,
+      lastPeggedAt: now().toISOString(),
+      lastPegBounds: normalizedBounds,
     }
 
     return updatedRecord
@@ -353,7 +353,7 @@ async function updateSavedRecordPinState({
 module.exports = {
   getManifestFilename,
   getEmptyRecordManifest,
-  normalizePinBounds,
+  normalizePegBounds,
   sortRecordsByCreatedAtDesc,
   reconcileRecords,
   readRecordManifest,
@@ -362,5 +362,5 @@ module.exports = {
   deleteSavedRecord,
   getSavedRecord,
   saveTranslatedRecord,
-  updateSavedRecordPinState,
+  updateSavedRecordPegState,
 }

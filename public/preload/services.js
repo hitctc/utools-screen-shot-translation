@@ -11,18 +11,18 @@ const {
   saveTranslationCredentials,
 } = require('./translationCredentialStore.cjs')
 const {
-  pinTranslatedImage,
-  attachPinnedRecord,
-  repinSavedRecordImage,
-} = require('./pinWindowManager.cjs')
+  pegTranslatedImage,
+  attachPeggedRecord,
+  repegSavedRecordImage,
+} = require('./pegImageWindowManager.cjs')
 const { buildImageDataUrlFromBuffer } = require('./imageMime.cjs')
 const fs = require('fs')
 const path = require('path')
 
 const UI_SETTINGS_KEY = 'screen-shot-translation-ui-settings'
 const PLUGIN_SETTINGS_KEY = 'screen-shot-translation-settings'
-const RUN_FEATURE_CODE = 'screen-shot-translation-run'
-const RECORDS_FEATURE_CODE = 'screen-shot-translation-records'
+const RUN_FEATURE_CODE = 'screen-shot-translation-peg-run'
+const RECORDS_FEATURE_CODE = 'screen-shot-translation-peg-records'
 const SETTINGS_FEATURE_CODE = 'screen-shot-translation-settings'
 const PANEL_INIT_EVENT = 'screen-shot-translation:panel-init'
 
@@ -75,7 +75,7 @@ function concealPluginWindow(runtime = window.utools) {
   }
 }
 
-// 成功钉住后更稳的收尾是直接退出插件主窗口，让钉住窗体单独留在桌面上。
+// 成功钉图后更稳的收尾是直接退出插件主窗口，让钉图窗体单独留在桌面上。
 function dismissPluginWindowAfterSuccess(runtime = window.utools) {
   if (typeof runtime?.outPlugin === 'function') {
     runtime.outPlugin()
@@ -235,7 +235,7 @@ function openPanelWindow({ view, result } = {}, runtime = window.utools) {
   const nextWindow = runtime.createBrowserWindow(
     `${PANEL_HTML_PATH}?view=${encodeURIComponent(normalizedView)}`,
     {
-      title: '截屏翻译并钉住',
+      title: '截屏翻译并钉图',
       width: 1120,
       height: getUiSettings().windowHeight,
       minWidth: 760,
@@ -417,7 +417,7 @@ function toFileUrl(filePath) {
   return filePath
 }
 
-// 记录页重钉优先把本地图片转成 data url，再交给 pin window 做透明白底处理。
+// 记录页重钉图优先把本地图片转成 data url，再交给 peg window 做透明白底处理。
 // 这样可以避开 file:// 图片在子窗口 canvas 里读像素时可能直接失败的问题。
 async function readImageAsDataUrl(filePath) {
   if (!filePath || typeof filePath !== 'string') {
@@ -432,11 +432,11 @@ async function readImageAsDataUrl(filePath) {
   }
 }
 
-// 钉住窗口拖动结束后，要把最后成功停留的位置写回记录清单。
-function createPersistPinnedRecordBounds(settings) {
+// 钉图窗口拖动结束后，要把最后成功停留的位置写回记录清单。
+function createPersistPeggedRecordBounds(settings) {
   return (recordId, bounds) =>
     typeof recordId === 'string' && recordId.trim()
-      ? require('./recordStore.cjs').updateSavedRecordPinState({
+      ? require('./recordStore.cjs').updateSavedRecordPegState({
           fs,
           path,
           settings,
@@ -483,7 +483,7 @@ function captureImageViaOfficialApi(runtime = window.utools) {
 function runCaptureTranslationPin() {
   const settings = getPluginSettings()
   const credentials = readTranslationCredentials()
-  const persistRecordPinState = createPersistPinnedRecordBounds(settings)
+  const persistRecordPegState = createPersistPeggedRecordBounds(settings)
 
   return runMainWorkflow({
     settings,
@@ -494,30 +494,30 @@ function runCaptureTranslationPin() {
         settings,
         credentials,
       }),
-    pinImage: async (translationResult) =>
-      pinTranslatedImage({
+    pegImage: async (translationResult) =>
+      pegTranslatedImage({
         utools: window.utools,
         imageSrc: translationResult?.translatedImageDataUrl,
         bounds: null,
-        persistRecordPinState,
+        persistRecordPegState,
       }),
-    saveImage: async (translationResult, pinResult) => {
+    saveImage: async (translationResult, pegResult) => {
       const savedRecordResult = await require('./recordStore.cjs').saveTranslatedRecord({
         fs,
         path,
         settings,
         translationResult,
-        bounds: pinResult?.bounds,
+        bounds: pegResult?.bounds,
       })
 
       if (!savedRecordResult?.record?.id) {
         return { ok: false, code: 'save-failed' }
       }
 
-      return attachPinnedRecord({
-        windowId: pinResult?.windowId,
+      return attachPeggedRecord({
+        windowId: pegResult?.windowId,
         recordId: savedRecordResult.record.id,
-        persistRecordPinState,
+        persistRecordPegState,
       })
     },
   }).then((result) => {
@@ -608,10 +608,10 @@ window.services = {
   openExternalLink,
   listSavedRecords: () => listSavedRecords({ fs, path, settings: getPluginSettings() }),
   deleteSavedRecord: (recordId) => deleteSavedRecord({ fs, path, settings: getPluginSettings(), recordId }),
-  // 记录页重钉走真实记录读取和真实钉住窗口，已钉住时由 pin manager 负责拦截。
-  repinSavedRecord: async (recordId) => {
+  // 记录页重钉图走真实记录读取和真实钉图窗口，已钉图时由 peg manager 负责拦截。
+  repegSavedRecord: async (recordId) => {
     const settings = getPluginSettings()
-    const persistRecordPinState = createPersistPinnedRecordBounds(settings)
+    const persistRecordPegState = createPersistPeggedRecordBounds(settings)
     const record = await require('./recordStore.cjs').getSavedRecord({
       fs,
       path,
@@ -620,17 +620,17 @@ window.services = {
     })
 
     if (!record) {
-      return { ok: false, code: 'repin-failed' }
+      return { ok: false, code: 'repeg-failed' }
     }
 
     const imagePath = path.resolve(settings.saveDirectory, record.imageFilename)
     const inlineImageSrc = await readImageAsDataUrl(imagePath)
 
-    return repinSavedRecordImage({
+    return repegSavedRecordImage({
       utools: window.utools,
       record,
       imageSrc: inlineImageSrc || toFileUrl(imagePath),
-      persistRecordPinState,
+      persistRecordPegState,
     })
   },
   runCaptureTranslationPin,

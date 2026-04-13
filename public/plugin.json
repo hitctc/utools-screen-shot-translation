@@ -6,15 +6,15 @@
   },
   "features": [
     {
-      "code": "screen-shot-translation-run",
-      "explain": "截屏、翻译并把翻译结果钉住到原位置",
+      "code": "screen-shot-translation-peg-run",
+      "explain": "截屏、翻译并把翻译结果钉图到默认位置",
       "mainHide": true,
-      "cmds": ["截屏翻译钉住"]
+      "cmds": ["截屏翻译钉图"]
     },
     {
-      "code": "screen-shot-translation-records",
-      "explain": "查看已保存的钉住记录",
-      "cmds": ["钉住记录"]
+      "code": "screen-shot-translation-peg-records",
+      "explain": "查看已保存的钉图记录",
+      "cmds": ["钉图记录"]
     },
     {
       "code": "screen-shot-translation-settings",

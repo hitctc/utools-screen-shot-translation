@@ -7,7 +7,7 @@
   const DEFAULT_UI_SETTINGS = {
     themeMode: 'system',
     windowHeight: 640,
-    recordsColumnCount: 3,
+    recordsColumnCount: 4,
   }
 
   const DEFAULT_PLUGIN_SETTINGS = {
@@ -37,8 +37,9 @@
   const WINDOW_HEIGHT_MIN = 480
   const WINDOW_HEIGHT_MAX = 960
   const WINDOW_HEIGHT_STEP = 20
+  const RECORDS_COLUMN_COUNT_OPTIONS = [3, 4, 5]
   const RECORDS_COLUMN_COUNT_MIN = 3
-  const RECORDS_COLUMN_COUNT_MAX = 6
+  const RECORDS_COLUMN_COUNT_MAX = 5
 
   // 页面壳只保留最小转义能力，避免把记录 id、目录路径和失败文案直接插进 HTML。
   function escapeHtml(value) {
@@ -166,17 +167,17 @@
           showOpenSettings: false,
           showClose: true,
         }
-      case 'pin-failed':
+      case 'peg-failed':
         return {
-          title: '钉住失败',
-          message: '这次没有把结果钉住到屏幕上。',
+          title: '钉图失败',
+          message: '这次没有把结果钉到屏幕上。',
           showRetry: true,
           showOpenSettings: false,
           showClose: true,
         }
-      case 'repin-failed':
+      case 'repeg-failed':
         return {
-          title: '重钉失败',
+          title: '重钉图失败',
           message: '记录页里的重钉动作暂时没有完成。',
           showRetry: true,
           showOpenSettings: false,
@@ -184,7 +185,7 @@
         }
       default:
         return {
-          title: '这次没有完成钉住',
+          title: '这次没有完成钉图',
           message: '流程执行失败，请重试。',
           showRetry: true,
           showOpenSettings: false,
@@ -323,6 +324,7 @@
     WINDOW_HEIGHT_MIN,
     WINDOW_HEIGHT_MAX,
     WINDOW_HEIGHT_STEP,
+    RECORDS_COLUMN_COUNT_OPTIONS,
     RECORDS_COLUMN_COUNT_MIN,
     RECORDS_COLUMN_COUNT_MAX,
     escapeHtml,

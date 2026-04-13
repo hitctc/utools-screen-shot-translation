@@ -6,25 +6,25 @@
 
 当前运行壳已经切成静态模板插件模型：
 
-- `截屏翻译钉住` 不再经过页面壳
-- `钉住记录 / 设置 / 失败结果` 由 `public/panel.html` 承载
+- `截屏翻译钉图` 不再经过页面壳
+- `钉图记录 / 设置 / 失败结果` 由 `public/panel.html` 承载
 - 旧的 `Vue / Vite / src/` 代码已经清理，不再保留双轨运行壳
 
 当前正式入口：
 
-- `截屏翻译钉住`
-- `钉住记录`
+- `截屏翻译钉图`
+- `钉图记录`
 - `设置`
 
 当前主流程语义：
 
-- `截屏翻译钉住`
-  - 由 `public/preload/services.js` 里的 `window.exports['screen-shot-translation-run']` 直接启动
+- `截屏翻译钉图`
+  - 由 `public/preload/services.js` 里的 `window.exports['screen-shot-translation-peg-run']` 直接启动
   - 先走 uTools 官方 `screenCapture(callback)`
   - 再走百度图片翻译 `V2`
-  - 翻译成功后默认钉到当前屏幕右上角
-- `钉住记录`
-  - 由 `window.exports['screen-shot-translation-records']` 打开静态面板窗口
+  - 翻译成功后默认钉图到当前屏幕左上角
+- `钉图记录`
+  - 由 `window.exports['screen-shot-translation-peg-records']` 打开静态面板窗口
 - `设置`
   - 由 `window.exports['screen-shot-translation-settings']` 打开静态面板窗口
 
@@ -47,10 +47,12 @@
   - `百度 AppID / Access Token`
   - `themeMode`
   - `windowHeight`
-- `钉住记录` 页已支持：
+- `钉图记录` 页已支持：
   - 读取保存目录总清单
   - 记录瀑布流展示
-  - 默认 3 列，支持通过滑块调到 3~6 列并持久化
+  - 默认 4 列，支持在右下角操作组中上拉选择 3 / 4 / 5 列并持久化
+  - 点击图片可在当前页面中央打开预览层，支持点空白、右上角按钮和 `ESC` 关闭
+  - 图片遮罩层内常驻 `删除 / 重钉图` 两个文字动作
   - 删除记录时按设置决定是否二次确认
 - `preload` 已接通：
   - 设置持久化
@@ -59,7 +61,7 @@
   - 官方 `screenCapture` 截图桥接
   - 百度图片翻译桥接（纯 V2，块级回填优先）
   - 百度凭证同步存储
-  - 真实钉住窗口与重钉
+  - 真实钉图窗口与重钉图
   - 主流程失败归因
 
 当前界面样式约束：
@@ -82,7 +84,7 @@
 当前已知限制：
 
 - 当前主流程不再追求“按截图原位置钉回”
-- 首次钉图默认落到当前屏幕右上角；只有记录重钉时才优先回到上次保存位置
+- 首次钉图默认落到当前屏幕左上角；只有记录重钉图时才优先回到上次保存位置
 - GUI 级 smoke test 仍需在 uTools 里人工验证
 
 常用命令：
@@ -97,13 +99,13 @@
 - `npm run dev` 和 `npm run build` 当前都走静态复制脚本，会把 `public/` 同步成 `dist/`
 - 构建产物验证时，用 [dist/plugin.json](/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/dist/plugin.json)
 - 当前 `plugin.json` 已不再配置 `main`，也不再配置 `development.main`
-- 这意味着 `截屏翻译钉住` 不再经过自定义主窗口页面壳
+- 这意味着 `截屏翻译钉图` 不再经过自定义主窗口页面壳
 
 如果要验证截图入口是否已经切到新的模板插件运行模型，按这个顺序：
 
 1. 在 uTools 开发者工具里断开当前插件。
 2. 重新接入 [public/plugin.json](/Users/tc-nihao/100-tc/700-code/100-center/utools-screen-shot-translation/public/plugin.json)。
-3. 再触发 `截屏翻译钉住`。
+3. 再触发 `截屏翻译钉图`。
 4. 如果仍然先出现白色页面壳，说明 uTools 还没有真正切到新的模板插件入口模型。
 
 当前仓库只保留静态 `HTML + jQuery + preload` 这一条运行路径，不再保留旧的 `Vue / Vite / src/` 壳代码。

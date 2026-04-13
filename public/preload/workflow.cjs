@@ -3,7 +3,7 @@ const WORKFLOW_CODES = {
   saveConfigInvalid: 'save-config-invalid',
   captureCancelled: 'capture-cancelled',
   translationFailed: 'translation-failed',
-  pinFailed: 'pin-failed',
+  pegFailed: 'peg-failed',
   saveFailed: 'save-failed',
 }
 
@@ -50,12 +50,12 @@ async function runWorkflowStep(step, failureCode, ...args) {
   }
 }
 
-// 主流程只负责按顺序编排 capture -> translate -> pin -> save，不关心底层实现细节。
+// 主流程只负责按顺序编排 capture -> translate -> peg -> save，不关心底层实现细节。
 async function runMainWorkflow({
   settings,
   captureImage,
   translateImage,
-  pinImage,
+  pegImage,
   saveImage,
 } = {}) {
   const normalizedSettings = normalizeWorkflowSettings(settings)
@@ -74,9 +74,9 @@ async function runMainWorkflow({
     return translationResult
   }
 
-  const pinResult = await runWorkflowStep(pinImage, WORKFLOW_CODES.pinFailed, translationResult, captureResult)
-  if (!isOkResult(pinResult)) {
-    return pinResult
+  const pegResult = await runWorkflowStep(pegImage, WORKFLOW_CODES.pegFailed, translationResult, captureResult)
+  if (!isOkResult(pegResult)) {
+    return pegResult
   }
 
   if (normalizedSettings.saveTranslatedImage) {
@@ -84,7 +84,7 @@ async function runMainWorkflow({
       saveImage,
       WORKFLOW_CODES.saveFailed,
       translationResult,
-      pinResult,
+      pegResult,
     )
     if (!isOkResult(saveResult)) {
       return saveResult

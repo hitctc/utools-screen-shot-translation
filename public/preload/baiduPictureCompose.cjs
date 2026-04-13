@@ -366,7 +366,7 @@ function buildCompositeSvgDataUrl({ backgroundImageDataUrl, imageSize, blocks, i
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 }
 
-// 默认用 Electron nativeImage 把 SVG 数据转成 PNG 字节，保证后续钉住和保存链路都继续吃位图。
+// 默认用 Electron nativeImage 把 SVG 数据转成 PNG 字节，保证后续钉图和保存链路都继续吃位图。
 function rasterizeSvgToPngBase64({ svgDataUrl, electron }) {
   const nativeImage = loadElectronModule(electron)?.nativeImage
   if (!nativeImage || typeof nativeImage.createFromDataURL !== 'function') {
@@ -406,7 +406,7 @@ async function composeTranslatedBlocksToPng({
     backgroundImageDataUrl,
     imageSize,
     blocks,
-    // 钉住层本来就叠在原屏幕上，继续把整张截图背景带进去只会形成大面积遮挡。
+    // 钉图层本来就叠在原屏幕上，继续把整张截图背景带进去只会形成大面积遮挡。
     includeBackgroundImage: false,
   })
   if (!svgDataUrl) {

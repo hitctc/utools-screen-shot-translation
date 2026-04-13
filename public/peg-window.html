@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Pin Window</title>
+    <title>Peg Window</title>
     <style>
       html,
       body {
@@ -16,25 +16,34 @@
       }
 
       #root {
-        --pin-shadow-gap: 6px;
+        --peg-frame-width: 6px;
         position: relative;
         width: 100%;
         height: 100%;
-        padding: var(--pin-shadow-gap);
+        padding: var(--peg-frame-width);
         box-sizing: border-box;
         cursor: move;
-        background: transparent;
+        background: rgba(123, 200, 255, 0.52);
+        border-radius: 10px;
+        overflow: hidden;
       }
 
-      #root.pin-attention {
-        animation: pin-attention 780ms cubic-bezier(0.36, 0.07, 0.19, 0.97) 1;
+      #root:focus,
+      #root:focus-visible {
+        outline: none;
+        /* background: rgb(123, 200, 255); */
+        background: rgb(215, 25, 33, 0.82);
       }
 
-      #root.pin-copied::after {
-        animation: pin-copied-border 720ms ease-out 1;
+      #root.peg-attention {
+        animation: peg-attention 780ms cubic-bezier(0.36, 0.07, 0.19, 0.97) 1;
       }
 
-      @keyframes pin-attention {
+      #root.peg-copied {
+        animation: peg-copied-border 720ms ease-out 1;
+      }
+
+      @keyframes peg-attention {
         0%,
         100% {
           transform: translateX(0);
@@ -73,7 +82,7 @@
         }
       }
 
-      @keyframes pin-copied-border {
+      @keyframes peg-copied-border {
         0% {
           border-color: rgba(123, 200, 255, 0.52);
           box-shadow: 0 0 0 rgba(123, 200, 255, 0);
@@ -90,7 +99,7 @@
         }
       }
 
-      @keyframes pin-copied-text {
+      @keyframes peg-copied-text {
         0%,
         100% {
           transform: translateX(0);
@@ -121,22 +130,13 @@
         }
       }
 
-      #root::after {
-        content: '';
-        position: absolute;
-        inset: 0;
-        border-radius: 10px;
-        border: 6px solid rgba(123, 200, 255, 0.52);
-        box-sizing: border-box;
-        pointer-events: none;
-      }
-
       #frame {
+        position: relative;
         width: 100%;
         height: 100%;
         background: transparent;
         overflow: hidden;
-        border-radius: 8px;
+        border-radius: calc(10px - var(--peg-frame-width));
       }
 
       #copy-feedback {
@@ -157,9 +157,9 @@
         z-index: 2;
       }
 
-      #root.pin-copied #copy-feedback {
+      #root.peg-copied #copy-feedback {
         opacity: 1;
-        animation: pin-copied-text 720ms cubic-bezier(0.36, 0.07, 0.19, 0.97) 1;
+        animation: peg-copied-text 720ms cubic-bezier(0.36, 0.07, 0.19, 0.97) 1;
       }
 
       #image {
@@ -183,10 +183,10 @@
       const frameElement = document.getElementById('frame')
       const copyFeedbackElement = document.getElementById('copy-feedback')
       const imageElement = document.getElementById('image')
-      const PIN_ATTENTION_CLASS = 'pin-attention'
-      const PIN_ATTENTION_DURATION_MS = 780
-      const PIN_COPIED_CLASS = 'pin-copied'
-      const PIN_COPIED_DURATION_MS = 720
+      const PEG_ATTENTION_CLASS = 'peg-attention'
+      const PEG_ATTENTION_DURATION_MS = 780
+      const PEG_COPIED_CLASS = 'peg-copied'
+      const PEG_COPIED_DURATION_MS = 720
       const WHEEL_ZOOM_END_DELAY_MS = 80
       const WHEEL_ZOOM_SENSITIVITY = 0.0014
       const MAX_LIVE_ZOOM_IN_STEP = 1.05
@@ -195,7 +195,7 @@
       const MIN_LIVE_ZOOM_LOG_STEP = 0.0045
       const ZOOM_SMOOTHING_RATIO = 0.72
       const WHEEL_LINE_HEIGHT_PX = 16
-      let pinChannel = ''
+      let pegChannel = ''
       let dragging = false
       let attentionTimer = 0
       let copyFeedbackTimer = 0
@@ -213,7 +213,7 @@
       const EDGE_ALPHA_THRESHOLD = 180
       const EDGE_WHITE_CHROMA_THRESHOLD = 12
       const CONTENT_ALPHA_THRESHOLD = 24
-      const CONTENT_BOUNDS_PADDING = 1
+      const CONTENT_BOUNDS_PADDING = 0
 
       function isNearWhitePixel(data, pixelIndex) {
         const red = Number(data[pixelIndex])
@@ -386,11 +386,11 @@
       }
 
       function sendToParent(payload) {
-        if (!pinChannel || !window.utools || typeof window.utools.sendToParent !== 'function') {
+        if (!pegChannel || !window.utools || typeof window.utools.sendToParent !== 'function') {
           return
         }
 
-        window.utools.sendToParent(pinChannel, payload)
+        window.utools.sendToParent(pegChannel, payload)
       }
 
       function clampRatio(value) {
@@ -470,8 +470,8 @@
         })
       }
 
-      // 透明 pin window 只有在自身明确拿到焦点后，组合键监听才稳定。
-      function focusPinSurface() {
+      // 透明 peg window 只有在自身明确拿到焦点后，组合键监听才稳定。
+      function focusPegSurface() {
         try {
           root?.focus?.({ preventScroll: true })
         } catch {
@@ -484,22 +484,22 @@
           return
         }
 
-        root.classList.remove(PIN_COPIED_CLASS)
+        root.classList.remove(PEG_COPIED_CLASS)
         void root.offsetWidth
-        root.classList.add(PIN_COPIED_CLASS)
+        root.classList.add(PEG_COPIED_CLASS)
 
         if (copyFeedbackTimer) {
           window.clearTimeout(copyFeedbackTimer)
         }
 
         copyFeedbackTimer = window.setTimeout(() => {
-          root.classList.remove(PIN_COPIED_CLASS)
+          root.classList.remove(PEG_COPIED_CLASS)
           copyFeedbackTimer = 0
-        }, PIN_COPIED_DURATION_MS + 40)
+        }, PEG_COPIED_DURATION_MS + 40)
       }
 
       // 复制直接走 uTools 官方剪贴板能力，避免在子窗口里继续依赖 Electron clipboard 的兼容性。
-      function copyPinnedImageToClipboard() {
+      function copyPeggedImageToClipboard() {
         const imageSource = clipboardImageSource || imageElement.currentSrc || imageElement.src
 
         if (
@@ -534,7 +534,7 @@
       }
 
       function handleClipboardCopyRequest(event) {
-        if (!copyPinnedImageToClipboard()) {
+        if (!copyPeggedImageToClipboard()) {
           return
         }
 
@@ -542,12 +542,12 @@
         event.stopPropagation()
       }
 
-      // ESC 只在当前 pin window 已经拿到焦点时生效，复用现有 close 消息，不再单独扩一条父子协议。
+      // ESC 只在当前 peg window 已经拿到焦点时生效，复用现有 close 消息，不再单独扩一条父子协议。
       function shouldHandleEscapeClose(event) {
         return event.key === 'Escape' && !event.metaKey && !event.ctrlKey && !event.altKey
       }
 
-      function handlePinCloseRequest(event) {
+      function handlePegCloseRequest(event) {
         event.preventDefault()
         event.stopPropagation()
         sendToParent({ type: 'close' })
@@ -632,7 +632,7 @@
           return
         }
 
-        focusPinSurface()
+        focusPegSurface()
         dragging = true
         sendToParent({
           type: 'drag-start',
@@ -672,7 +672,7 @@
 
       window.addEventListener('keydown', (event) => {
         if (shouldHandleEscapeClose(event)) {
-          handlePinCloseRequest(event)
+          handlePegCloseRequest(event)
           return
         }
 
@@ -747,26 +747,26 @@
         sendZoomEnd()
       })
 
-      function playPinAttention() {
+      function playPegAttention() {
         if (!root) {
           return
         }
 
-        root.classList.remove(PIN_ATTENTION_CLASS)
+        root.classList.remove(PEG_ATTENTION_CLASS)
         void root.offsetWidth
-        root.classList.add(PIN_ATTENTION_CLASS)
+        root.classList.add(PEG_ATTENTION_CLASS)
 
         if (attentionTimer) {
           window.clearTimeout(attentionTimer)
         }
 
         attentionTimer = window.setTimeout(() => {
-          root.classList.remove(PIN_ATTENTION_CLASS)
+          root.classList.remove(PEG_ATTENTION_CLASS)
           attentionTimer = 0
-        }, PIN_ATTENTION_DURATION_MS + 40)
+        }, PEG_ATTENTION_DURATION_MS + 40)
       }
 
-      // 首帧先把原图解码成功，再让 pin window 露出来，避免用户先看到白壳。
+      // 首帧先把原图解码成功，再让 peg window 露出来，避免用户先看到白壳。
       function waitForImageReady(source) {
         if (!source) {
           imageElement.removeAttribute('src')
@@ -828,18 +828,15 @@
 
               context.drawImage(probe, 0, 0)
               const imageData = context.getImageData(0, 0, width, height)
-              imageData.data.set(
-                removeEdgeNearWhitePixels({
-                  data: imageData.data,
-                  width,
-                  height,
-                }),
-              )
-              context.putImageData(imageData, 0, 0)
+              const cleanedPixels = removeEdgeNearWhitePixels({
+                data: imageData.data,
+                width,
+                height,
+              })
               const contentBounds =
                 typeof findVisibleContentBounds === 'function'
                   ? findVisibleContentBounds({
-                      data: imageData.data,
+                      data: cleanedPixels,
                       width,
                       height,
                     })
@@ -868,12 +865,13 @@
                 const cropContext = cropCanvas.getContext('2d')
 
                 if (!cropContext) {
-                  resolve(canvas.toDataURL('image/png'))
+                  resolve(source)
                   return
                 }
 
+                // 检测边界时可以忽略浅白底，但最终展示仍要保留原图像素，避免边框底色透进内容区。
                 cropContext.drawImage(
-                  canvas,
+                  probe,
                   contentBounds.x,
                   contentBounds.y,
                   contentBounds.width,
@@ -894,7 +892,7 @@
                 return
               }
 
-              resolve(canvas.toDataURL('image/png'))
+              resolve(source)
             } catch {
               resolve('')
             }
@@ -905,13 +903,13 @@
         })
       }
 
-      window.__SCREEN_TRANSLATION_PIN_INIT__ = async function initPinWindow(payload) {
-        pinChannel = payload && typeof payload.channel === 'string' ? payload.channel : ''
+      window.__SCREEN_TRANSLATION_PEG_INIT__ = async function initPegWindow(payload) {
+        pegChannel = payload && typeof payload.channel === 'string' ? payload.channel : ''
         root.style.setProperty(
-          '--pin-shadow-gap',
+          '--peg-frame-width',
           typeof payload?.frameInset === 'number' ? `${payload.frameInset}px` : '6px',
         )
-        focusPinSurface()
+        focusPegSurface()
         const sourceImage = payload && typeof payload.imageSrc === 'string' ? payload.imageSrc : ''
         currentImageToken += 1
         const imageToken = currentImageToken
@@ -933,12 +931,12 @@
         })
       }
 
-      window.__SCREEN_TRANSLATION_PIN_ATTENTION__ = function triggerPinAttention() {
-        playPinAttention()
+      window.__SCREEN_TRANSLATION_PEG_ATTENTION__ = function triggerPegAttention() {
+        playPegAttention()
       }
 
       // 父窗口复制图片时，从这里拿到当前真正显示的位图来源，避免主进程继续猜图片状态。
-      window.__SCREEN_TRANSLATION_PIN_CLIPBOARD_IMAGE__ = function getClipboardImageSource() {
+      window.__SCREEN_TRANSLATION_PEG_CLIPBOARD_IMAGE__ = function getClipboardImageSource() {
         return clipboardImageSource || imageElement.currentSrc || imageElement.src || ''
       }
     </script>

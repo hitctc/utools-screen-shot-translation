@@ -2,7 +2,7 @@ const EDGE_WHITE_THRESHOLD = 234
 const EDGE_ALPHA_THRESHOLD = 180
 const EDGE_WHITE_CHROMA_THRESHOLD = 12
 const CONTENT_ALPHA_THRESHOLD = 24
-const CONTENT_BOUNDS_PADDING = 1
+const CONTENT_BOUNDS_PADDING = 0
 
 function isNearWhitePixel(data, pixelIndex) {
   const red = Number(data[pixelIndex])
@@ -92,7 +92,7 @@ function clampBoundsWithPadding(bounds, width, height) {
 }
 
 // 翻译图抠掉边缘浅底后，真正可见的内容会留下非透明像素。
-// 这里直接按可见像素求最小包围盒，比按整行/整列均值判断更紧，能减少钉住后的无效留白。
+// 这里直接按可见像素求最小包围盒，比按整行/整列均值判断更紧，能减少钉图后的无效留白。
 function findVisibleContentBounds({ data, width, height }) {
   if (!data || !Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
     return null
@@ -137,7 +137,7 @@ function findVisibleContentBounds({ data, width, height }) {
   }, width, height)
 }
 
-// 图片像素级 bbox 需要先映射到当前实际显示内容区，才能拿来改 pin window 几何。
+// 图片像素级 bbox 需要先映射到当前实际显示内容区，才能拿来改 peg window 几何。
 function scaleContentBoundsToTarget({
   sourceWidth,
   sourceHeight,

@@ -18,6 +18,8 @@
     loadingRecords: false,
     warning: '',
     prefersDark: false,
+    recordsColumnMenuOpen: false,
+    previewRecordId: '',
   }
 
   // 统一刷新本地快照，避免 records/settings 各自读一份旧状态。
@@ -69,12 +71,14 @@
   function switchView(view, result) {
     state.view = normalizeView(view)
     state.result = result ?? null
+    state.recordsColumnMenuOpen = false
+    state.previewRecordId = ''
     void renderCurrentView()
   }
 
   function resultPresentation() {
     return panelStateApi.mapWorkflowFailureToResult?.(state.result?.code) || {
-      title: '这次没有完成钉住',
+      title: '这次没有完成钉图',
       message: '流程执行失败，请重试。',
       showRetry: true,
       showOpenSettings: false,
@@ -91,6 +95,106 @@
     `
   }
 
+  function captureRecordsScrollTop() {
+    if (state.view !== 'records') {
+      return 0
+    }
+
+    return Math.max(window.scrollY || 0, document.documentElement?.scrollTop || 0, document.body?.scrollTop || 0)
+  }
+
+  function restoreRecordsScrollTop(scrollTop) {
+    if (state.view !== 'records') {
+      return
+    }
+
+    const safeScrollTop = Math.max(0, Number(scrollTop) || 0)
+    const applyScrollTop = () => {
+      if (typeof window.scrollTo === 'function') {
+        window.scrollTo(0, safeScrollTop)
+        return
+      }
+
+      if (document.documentElement) {
+        document.documentElement.scrollTop = safeScrollTop
+      }
+
+      if (document.body) {
+        document.body.scrollTop = safeScrollTop
+      }
+    }
+
+    if (typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => {
+        applyScrollTop()
+      })
+      return
+    }
+
+    applyScrollTop()
+  }
+
+  // 记录页预览统一根据 recordId 现算，避免删除后还挂着一份过期图片对象。
+  function findViewRecordById(recordId) {
+    const normalizedRecordId = String(recordId || '').trim()
+    if (!normalizedRecordId) {
+      return null
+    }
+
+    return (
+      state.records
+        .map((record, index) =>
+          panelStateApi.mapSavedRecordToViewRecord?.(record, index, state.pluginSettings.saveDirectory),
+        )
+        .find((record) => record?.id === normalizedRecordId) || null
+    )
+  }
+
+  function renderRecordPreviewModal() {
+    const previewRecord = findViewRecordById(state.previewRecordId)
+    if (!previewRecord) {
+      return ''
+    }
+
+    return `
+      <div class="record-preview-modal" role="presentation">
+        <button
+          type="button"
+          class="record-preview-modal__backdrop"
+          data-action="close-record-preview"
+          aria-label="关闭图片预览"
+        ></button>
+        <div
+          class="record-preview-modal__dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-label="${escapeHtml(previewRecord.orderLabel)} 预览"
+        >
+          <button
+            type="button"
+            class="record-preview-modal__close"
+            id="record-preview-close"
+            data-action="close-record-preview"
+            aria-label="关闭图片预览"
+          >
+            关闭
+          </button>
+          <div class="record-preview-modal__media">
+            <img
+              class="record-preview-modal__image"
+              src="${escapeHtml(previewRecord.imagePath)}"
+              alt="${escapeHtml(previewRecord.orderLabel)}"
+            />
+          </div>
+          <div class="record-preview-modal__meta">
+            <span>${escapeHtml(previewRecord.orderLabel)}</span>
+            <span>${escapeHtml(previewRecord.createdAtLabel)}</span>
+          </div>
+        </div>
+      </div>
+    `
+  }
+
   function renderRecordsColumns() {
     const columnCount = state.uiSettings.recordsColumnCount
     const mappedRecords = state.records
@@ -103,7 +207,7 @@
       : [mappedRecords]
 
     return `
-      <section class="records-grid" style="--records-column-count:${columns.length || 1}" aria-label="钉住记录列表">
+      <section class="records-grid" style="--records-column-count:${columns.length || 1}" aria-label="钉图记录列表">
         ${columns
           .map(
             (columnRecords, columnIndex) => `
@@ -112,20 +216,41 @@
                   .map(
                     (record) => `
                       <article class="record-card" data-record-id="${escapeHtml(record.id)}">
-                        <button type="button" class="record-card__preview" data-action="repin-record" data-record-id="${escapeHtml(record.id)}">
-                          <img class="record-card__image" src="${escapeHtml(record.imagePath)}" alt="${escapeHtml(record.orderLabel)}" />
-                          <span class="record-card__overlay">
+                        <div class="record-card__frame">
+                          <button
+                            type="button"
+                            class="record-card__preview"
+                            data-action="preview-record"
+                            data-record-id="${escapeHtml(record.id)}"
+                            aria-label="预览 ${escapeHtml(record.orderLabel)}"
+                          >
+                            <img class="record-card__image" src="${escapeHtml(record.imagePath)}" alt="${escapeHtml(record.orderLabel)}" />
+                          </button>
+                          <div class="record-card__overlay">
                             <span class="record-card__order">${escapeHtml(record.orderLabel)}</span>
-                            <span class="record-card__action">重钉</span>
-                          </span>
-                        </button>
+                            <div class="record-card__overlay-actions">
+                              <button
+                                type="button"
+                                class="record-card__overlay-action record-card__overlay-action--danger"
+                                data-action="delete-record"
+                                data-record-id="${escapeHtml(record.id)}"
+                              >
+                                删除
+                              </button>
+                              <button
+                                type="button"
+                                class="record-card__overlay-action"
+                                data-action="repeg-record"
+                                data-record-id="${escapeHtml(record.id)}"
+                              >
+                                重钉图
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                         <div class="record-card__meta">
                           <span>${escapeHtml(record.orderLabel)}</span>
                           <span>${escapeHtml(record.createdAtLabel)}</span>
-                        </div>
-                        <div class="record-card__actions">
-                          <button type="button" class="secondary-button secondary-button--compact" data-action="repin-record" data-record-id="${escapeHtml(record.id)}">重新钉住</button>
-                          <button type="button" class="secondary-button secondary-button--compact secondary-button--danger" data-action="delete-record" data-record-id="${escapeHtml(record.id)}">删除</button>
                         </div>
                       </article>
                     `,
@@ -156,37 +281,26 @@
     `
   }
 
-  async function renderRecords() {
+  async function renderRecords(options = {}) {
+    const preserveScroll = Boolean(options.preserveScroll)
+    const previousScrollTop = preserveScroll ? captureRecordsScrollTop() : 0
     readSnapshot()
     const warning = state.warning || panelStateApi.getSaveDirectoryWarning?.(state.pluginSettings) || ''
+    const columnOptions = panelStateApi.RECORDS_COLUMN_COUNT_OPTIONS || [3, 4, 5]
     const shellMarkup = `
       <section class="page-shell page-shell--records">
-        <header class="hero-card hero-card--compact">
+        <header class="hero-card hero-card--compact records-hero-card">
           <div class="hero-card__eyebrow">
-            <p class="section-label">钉住记录</p>
+            <p class="section-label">钉图记录</p>
             <span class="status-chip">${escapeHtml(themeStatus())}</span>
           </div>
-          <h1>钉住记录</h1>
-          <p class="hero-copy">点击缩略图会按最后位置重新钉住，删除会按设置里的确认开关执行。</p>
+          <h1>钉图记录</h1>
+          <p class="hero-copy">点击图片可在当前页预览，重钉图和删除按各自动作执行。</p>
           <div class="records-toolbar">
             <div class="records-toolbar__meta">
               <span class="section-label">记录总数</span>
               <strong class="records-toolbar__count">${state.records.length} 条</strong>
             </div>
-            <label class="records-toolbar__density" for="records-column-count">
-              <span class="records-toolbar__density-label">列数</span>
-              <input
-                id="records-column-count"
-                class="records-toolbar__slider"
-                type="range"
-                min="${panelStateApi.RECORDS_COLUMN_COUNT_MIN || 3}"
-                max="${panelStateApi.RECORDS_COLUMN_COUNT_MAX || 6}"
-                step="1"
-                value="${state.uiSettings.recordsColumnCount}"
-              />
-              <span class="records-toolbar__density-value">${state.uiSettings.recordsColumnCount} 列</span>
-            </label>
-            ${renderInfoStrip('当前排布', `${state.uiSettings.recordsColumnCount} 列瀑布流`)}
           </div>
         </header>
         ${warning ? `<p class="state-card state-card--error">${escapeHtml(warning)}</p>` : ''}
@@ -197,14 +311,54 @@
               ? renderRecordsColumns()
               : renderRecordsEmptyState()
         }
-        <div class="records-floating-action">
-          <button type="button" class="secondary-button records-floating-action__button" id="records-open-settings">设置</button>
+        ${renderRecordPreviewModal()}
+        <div class="records-floating-action${state.recordsColumnMenuOpen ? ' records-floating-action--menu-open' : ''}">
+          ${
+            state.recordsColumnMenuOpen
+              ? `
+                <div class="records-column-menu" role="menu" aria-label="选择记录列数">
+                  ${columnOptions
+                    .map(
+                      (columnCount) => `
+                        <button
+                          type="button"
+                          class="records-column-menu__option${columnCount === state.uiSettings.recordsColumnCount ? ' records-column-menu__option--active' : ''}"
+                          data-action="set-records-column-count"
+                          data-column-count="${columnCount}"
+                          role="menuitemradio"
+                          aria-checked="${columnCount === state.uiSettings.recordsColumnCount}"
+                        >
+                          ${columnCount} 列
+                        </button>
+                      `,
+                    )
+                    .join('')}
+                </div>
+              `
+              : ''
+          }
+          <div class="records-floating-action__row">
+            <button
+              type="button"
+              class="secondary-button records-floating-action__button"
+              id="records-column-menu-toggle"
+              aria-haspopup="menu"
+              aria-expanded="${state.recordsColumnMenuOpen}"
+            >
+              ${state.uiSettings.recordsColumnCount} 列
+            </button>
+            <button type="button" class="secondary-button records-floating-action__button" id="records-open-settings">设置</button>
+          </div>
         </div>
       </section>
     `
 
     views.records.html(shellMarkup)
     showView('records')
+
+    if (preserveScroll) {
+      restoreRecordsScrollTop(previousScrollTop)
+    }
   }
 
   function renderSettings() {
@@ -418,20 +572,33 @@
     await renderRecords()
   }
 
-  async function refreshRecords() {
+  async function refreshRecords(options = {}) {
+    const preserveScroll = Boolean(options.preserveScroll)
+    // 刷新记录页会先渲染一次“加载中”，再渲染最终结果；这里要只捕获一次原始滚动位置，
+    // 否则第二次渲染会把已经被浏览器回弹后的顶部位置重新记成 0。
+    const preservedScrollTop = preserveScroll ? captureRecordsScrollTop() : 0
     state.loadingRecords = true
     state.warning = ''
     await renderRecords()
+    if (preserveScroll) {
+      restoreRecordsScrollTop(preservedScrollTop)
+    }
 
     try {
       const manifest = (await services.listSavedRecords?.()) || {}
       state.records = Array.isArray(manifest.records) ? manifest.records : []
+      if (state.previewRecordId && !findViewRecordById(state.previewRecordId)) {
+        state.previewRecordId = ''
+      }
     } catch {
       state.records = []
-      state.warning = '读取钉住记录失败，请检查保存目录配置。'
+      state.warning = '读取钉图记录失败，请检查保存目录配置。'
     } finally {
       state.loadingRecords = false
       await renderRecords()
+      if (preserveScroll) {
+        restoreRecordsScrollTop(preservedScrollTop)
+      }
     }
   }
 
@@ -487,29 +654,76 @@
     }
   })
 
-  $(document).on('input', '#records-column-count', async function handleColumnCountInput() {
-    const nextUiSettings = services.saveUiSettings?.({ recordsColumnCount: Number($(this).val()) }) || state.uiSettings
-    state.uiSettings = panelStateApi.normalizeUiSettings?.(nextUiSettings) || nextUiSettings
-    await renderRecords()
+  // 右下角列数菜单只负责 3 / 4 / 5 三档切换，不再在头部占据整条滑杆空间。
+  $(document).on('click', '#records-column-menu-toggle', async function handleColumnMenuToggle(event) {
+    event.preventDefault()
+    state.recordsColumnMenuOpen = !state.recordsColumnMenuOpen
+    await renderRecords({ preserveScroll: true })
   })
 
-  $(document).on('click', '[data-action=\"repin-record\"]', async function handleRepinRecord() {
+  $(document).on('click', '[data-action="set-records-column-count"]', async function handleColumnCountSelect(event) {
+    event.preventDefault()
+    const nextValue = Number($(this).data('column-count'))
+    const nextUiSettings = services.saveUiSettings?.({ recordsColumnCount: nextValue }) || state.uiSettings
+    state.uiSettings = panelStateApi.normalizeUiSettings?.(nextUiSettings) || nextUiSettings
+    state.recordsColumnMenuOpen = false
+    await renderRecords({ preserveScroll: true })
+  })
+
+  // 点击悬浮操作组外部时自动收起菜单，避免弹层残留挡住记录卡片。
+  $(document).on('click', async function handleDocumentClick(event) {
+    if (!state.recordsColumnMenuOpen || state.view !== 'records') {
+      return
+    }
+
+    if ($(event.target).closest('.records-floating-action').length) {
+      return
+    }
+
+    state.recordsColumnMenuOpen = false
+    await renderRecords({ preserveScroll: true })
+  })
+
+  $(document).on('click', '[data-action="preview-record"]', async function handlePreviewRecord(event) {
+    event.preventDefault()
     const recordId = String($(this).data('record-id') || '').trim()
     if (!recordId) {
       return
     }
 
-    const result = await services.repinSavedRecord?.(recordId)
+    state.previewRecordId = recordId
+    await renderRecords({ preserveScroll: true })
+  })
 
-    if (result?.ok === false && result.code !== 'already-pinned') {
+  $(document).on('click', '[data-action="close-record-preview"]', async function handleClosePreview(event) {
+    event.preventDefault()
+    state.previewRecordId = ''
+    await renderRecords({ preserveScroll: true })
+  })
+
+  $(document).on('click', '.record-preview-modal__dialog', function handlePreviewDialogClick(event) {
+    event.stopPropagation()
+  })
+
+  $(document).on('click', '[data-action=\"repeg-record\"]', async function handleRepegRecord(event) {
+    event.preventDefault()
+    const recordId = String($(this).data('record-id') || '').trim()
+    if (!recordId) {
+      return
+    }
+
+    const result = await services.repegSavedRecord?.(recordId)
+
+    if (result?.ok === false && result.code !== 'already-pegged') {
       switchView('result', result)
       return
     }
 
-    await refreshRecords()
+    await refreshRecords({ preserveScroll: true })
   })
 
-  $(document).on('click', '[data-action=\"delete-record\"]', async function handleDeleteRecord() {
+  $(document).on('click', '[data-action=\"delete-record\"]', async function handleDeleteRecord(event) {
+    event.preventDefault()
     const recordId = String($(this).data('record-id') || '').trim()
     if (!recordId) {
       return
@@ -523,11 +737,14 @@
     }
 
     try {
+      if (state.previewRecordId === recordId) {
+        state.previewRecordId = ''
+      }
       await services.deleteSavedRecord?.(recordId)
-      await refreshRecords()
+      await refreshRecords({ preserveScroll: true })
     } catch {
       state.warning = '删除记录失败，请稍后再试。'
-      await renderRecords()
+      await renderRecords({ preserveScroll: true })
     }
   })
 
@@ -605,6 +822,15 @@
 
   $(document).on('click', '#settings-reset-height', async () => {
     await updateWindowHeight(panelStateApi.DEFAULT_UI_SETTINGS?.windowHeight || 640)
+  })
+
+  $(document).on('keydown', async function handlePreviewEscape(event) {
+    if (event.key !== 'Escape' || !state.previewRecordId || state.view !== 'records') {
+      return
+    }
+
+    state.previewRecordId = ''
+    await renderRecords({ preserveScroll: true })
   })
 
   function attachSystemThemeListener() {

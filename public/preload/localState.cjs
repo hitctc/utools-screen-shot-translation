@@ -1,7 +1,7 @@
 const DEFAULT_UI_SETTINGS = {
   themeMode: 'system',
   windowHeight: 640,
-  recordsColumnCount: 3,
+  recordsColumnCount: 4,
 }
 
 const DEFAULT_PLUGIN_SETTINGS = {
@@ -13,10 +13,12 @@ const DEFAULT_PLUGIN_SETTINGS = {
 
 const WINDOW_HEIGHT_MIN = 480
 const WINDOW_HEIGHT_MAX = 960
+const RECORDS_COLUMN_COUNT_OPTIONS = [3, 4, 5]
 const RECORDS_COLUMN_COUNT_MIN = 3
-const RECORDS_COLUMN_COUNT_MAX = 6
+const RECORDS_COLUMN_COUNT_MAX = 5
 const VALID_THEME_MODES = new Set(['system', 'dark', 'light'])
 const VALID_TRANSLATION_MODES = new Set(['auto', 'en-to-zh', 'zh-to-en'])
+const VALID_RECORDS_COLUMN_COUNTS = new Set(RECORDS_COLUMN_COUNT_OPTIONS)
 
 // UI 设置只负责窗口外观相关项，读到脏值时统一回退到插件可接受的范围。
 function normalizeUiSettings(raw) {
@@ -33,7 +35,9 @@ function normalizeUiSettings(raw) {
         : DEFAULT_UI_SETTINGS.windowHeight,
     recordsColumnCount:
       Number.isFinite(recordsColumnCount) && recordsColumnCount > 0
-        ? Math.min(Math.max(recordsColumnCount, RECORDS_COLUMN_COUNT_MIN), RECORDS_COLUMN_COUNT_MAX)
+        ? VALID_RECORDS_COLUMN_COUNTS.has(recordsColumnCount)
+          ? recordsColumnCount
+          : Math.min(Math.max(recordsColumnCount, RECORDS_COLUMN_COUNT_MIN), RECORDS_COLUMN_COUNT_MAX)
         : DEFAULT_UI_SETTINGS.recordsColumnCount,
   }
 }
@@ -78,6 +82,7 @@ function mergePluginSettings(current, partial) {
 module.exports = {
   DEFAULT_UI_SETTINGS,
   DEFAULT_PLUGIN_SETTINGS,
+  RECORDS_COLUMN_COUNT_OPTIONS,
   normalizeUiSettings,
   normalizePluginSettings,
   mergePluginSettings,

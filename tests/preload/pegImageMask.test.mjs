@@ -7,7 +7,7 @@ const {
   removeEdgeNearWhitePixels,
   findVisibleContentBounds,
   scaleContentBoundsToTarget,
-} = require('../../public/preload/pinImageMask.cjs')
+} = require('../../public/preload/pegImageMask.cjs')
 
 function createImageData(width, height, fillPixel) {
   const data = new Uint8ClampedArray(width * height * 4)
@@ -74,7 +74,7 @@ test('removeEdgeNearWhitePixels keeps non-white light content visible', () => {
   assert.equal(centerAlpha, 255)
 })
 
-test('findVisibleContentBounds returns the bounding box of centered content on a large white canvas', () => {
+test('findVisibleContentBounds returns the exact bounding box of centered content on a large white canvas', () => {
   const input = createImageData(8, 6, (x, y) => {
     if (x >= 2 && x <= 5 && y >= 1 && y <= 4) {
       return [30, 30, 30, 255]
@@ -91,14 +91,14 @@ test('findVisibleContentBounds returns the bounding box of centered content on a
   })
 
   assert.deepEqual(bounds, {
-    x: 1,
-    y: 0,
-    width: 6,
-    height: 6,
+    x: 2,
+    y: 1,
+    width: 4,
+    height: 4,
   })
 })
 
-test('findVisibleContentBounds keeps a tight padded box around thin content after edge cleanup', () => {
+test('findVisibleContentBounds keeps a truly tight box around thin content after edge cleanup', () => {
   const input = createImageData(12, 8, (x, y) => {
     if (x === 5 && y >= 2 && y <= 5) {
       return [24, 24, 24, 255]
@@ -115,10 +115,10 @@ test('findVisibleContentBounds keeps a tight padded box around thin content afte
   })
 
   assert.deepEqual(bounds, {
-    x: 4,
-    y: 1,
-    width: 3,
-    height: 6,
+    x: 5,
+    y: 2,
+    width: 1,
+    height: 4,
   })
 })
 

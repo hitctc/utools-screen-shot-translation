@@ -7,7 +7,7 @@ const pluginJsonPath = fileURLToPath(new URL('../public/plugin.json', import.met
 
 test('template plugin run feature does not declare a custom main page shell', () => {
   const pluginManifest = JSON.parse(readFileSync(pluginJsonPath, 'utf8'))
-  const runFeature = pluginManifest.features.find((feature) => feature.code === 'screen-shot-translation-run')
+  const runFeature = pluginManifest.features.find((feature) => feature.code === 'screen-shot-translation-peg-run')
 
   assert.equal(Object.prototype.hasOwnProperty.call(pluginManifest, 'main'), false)
   assert.equal(runFeature?.mainHide, true)
@@ -19,8 +19,8 @@ test('template plugin run feature is expected to be provided by preload window.e
   assert.deepEqual(
     pluginManifest.features.map((feature) => feature.code),
     [
-      'screen-shot-translation-run',
-      'screen-shot-translation-records',
+      'screen-shot-translation-peg-run',
+      'screen-shot-translation-peg-records',
       'screen-shot-translation-settings',
     ],
   )

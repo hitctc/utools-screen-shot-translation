@@ -5,10 +5,10 @@ import path from 'node:path'
 
 const require = createRequire(import.meta.url)
 
-function loadPinWindowManager() {
-  const modulePath = path.resolve('public/preload/pinWindowManager.cjs')
+function loadPegWindowManager() {
+  const modulePath = path.resolve('public/preload/pegImageWindowManager.cjs')
   delete require.cache[modulePath]
-  return require('../../public/preload/pinWindowManager.cjs')
+  return require('../../public/preload/pegImageWindowManager.cjs')
 }
 
 function createBgraBitmap(width, height, fillPixel) {
@@ -28,8 +28,8 @@ function createBgraBitmap(width, height, fillPixel) {
   return data
 }
 
-test('pinTranslatedImage creates a pin window with only the outer border margin', async () => {
-  const { pinTranslatedImage } = loadPinWindowManager()
+test('pegTranslatedImage keeps window bounds aligned with the real pegged content area', async () => {
+  const { pegTranslatedImage } = loadPegWindowManager()
   let capturedOptions = null
   const calls = []
   const utools = {
@@ -53,7 +53,7 @@ test('pinTranslatedImage creates a pin window with only the outer border margin'
     },
   }
 
-  const result = await pinTranslatedImage({
+  const result = await pegTranslatedImage({
     utools,
     electron,
     imageSrc: 'data:image/png;base64,abc123',
@@ -81,8 +81,8 @@ test('pinTranslatedImage creates a pin window with only the outer border margin'
   )
 })
 
-test('pinTranslatedImage defaults to top-right when no historical bounds exist', async () => {
-  const { pinTranslatedImage } = loadPinWindowManager()
+test('pegTranslatedImage defaults to top-left when no historical bounds exist', async () => {
+  const { pegTranslatedImage } = loadPegWindowManager()
   let capturedOptions = null
   const utools = {
     getCursorScreenPoint: () => ({ x: 10, y: 10 }),
@@ -115,16 +115,16 @@ test('pinTranslatedImage defaults to top-right when no historical bounds exist',
     },
   }
 
-  const result = await pinTranslatedImage({
+  const result = await pegTranslatedImage({
     utools,
     electron,
     imageSrc: 'data:image/png;base64,translated',
     bounds: null,
-    persistRecordPinState: async () => null,
+    persistRecordPegState: async () => null,
   })
 
   assert.equal(result.ok, true)
-  assert.deepEqual(result.bounds, { x: 1336, y: 24, width: 80, height: 40 })
+  assert.deepEqual(result.bounds, { x: 6, y: 6, width: 80, height: 40 })
   assert.deepEqual(
     {
       x: capturedOptions?.x,
@@ -133,16 +133,77 @@ test('pinTranslatedImage defaults to top-right when no historical bounds exist',
       height: capturedOptions?.height,
     },
     {
-      x: 1330,
-      y: 18,
+      x: 0,
+      y: 0,
       width: 92,
       height: 52,
     },
   )
 })
 
-test('pinTranslatedImage preprocesses white-edge images before opening the pin window', async () => {
-  const { pinTranslatedImage } = loadPinWindowManager()
+test('pegTranslatedImage converts hiDPI image pixels back to logical window bounds when opening from the run flow', async () => {
+  const { pegTranslatedImage } = loadPegWindowManager()
+  let capturedOptions = null
+  const utools = {
+    getCursorScreenPoint: () => ({ x: 10, y: 10 }),
+    getDisplayNearestPoint: () => ({
+      scaleFactor: 2,
+      bounds: { x: 0, y: 0, width: 1440, height: 900 },
+    }),
+    createBrowserWindow: (_url, options, callback) => {
+      capturedOptions = options
+      queueMicrotask(() => callback?.())
+      return {
+        id: 1007,
+        webContents: {
+          executeJavaScript: async () => true,
+        },
+        show: () => {},
+        isDestroyed: () => false,
+      }
+    },
+  }
+  const electron = {
+    ipcRenderer: {
+      on: () => {},
+      off: () => {},
+    },
+    nativeImage: {
+      createFromDataURL: () => ({
+        getSize: () => ({ width: 200, height: 100 }),
+        toBitmap: () => createBgraBitmap(200, 100, () => [255, 255, 255, 255]),
+      }),
+    },
+  }
+
+  const result = await pegTranslatedImage({
+    utools,
+    electron,
+    imageSrc: 'data:image/png;base64,translated-hiDPI',
+    bounds: null,
+    persistRecordPegState: async () => null,
+  })
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(result.bounds, { x: 6, y: 6, width: 100, height: 50 })
+  assert.deepEqual(
+    {
+      x: capturedOptions?.x,
+      y: capturedOptions?.y,
+      width: capturedOptions?.width,
+      height: capturedOptions?.height,
+    },
+    {
+      x: 0,
+      y: 0,
+      width: 112,
+      height: 62,
+    },
+  )
+})
+
+test('pegTranslatedImage preprocesses white-edge images before opening the peg window', async () => {
+  const { pegTranslatedImage } = loadPegWindowManager()
   let capturedOptions = null
   let executedScript = ''
   let croppedRect = null
@@ -189,7 +250,7 @@ test('pinTranslatedImage preprocesses white-edge images before opening the pin w
     },
   }
 
-  const result = await pinTranslatedImage({
+  const result = await pegTranslatedImage({
     utools,
     electron,
     imageSrc: 'data:image/png;base64,source-image',
@@ -197,9 +258,88 @@ test('pinTranslatedImage preprocesses white-edge images before opening the pin w
   })
 
   assert.equal(result.ok, true)
-  assert.deepEqual(result.bounds, { x: 120, y: 210, width: 80, height: 40 })
-  assert.deepEqual(croppedRect, { x: 1, y: 1, width: 4, height: 4 })
+  assert.deepEqual(result.bounds, { x: 140, y: 220, width: 40, height: 20 })
+  assert.deepEqual(croppedRect, { x: 2, y: 2, width: 2, height: 2 })
   assert.match(executedScript, /cropped-image/)
+  assert.deepEqual(
+    {
+      x: capturedOptions?.x,
+      y: capturedOptions?.y,
+      width: capturedOptions?.width,
+      height: capturedOptions?.height,
+    },
+    {
+      x: 134,
+      y: 214,
+      width: 52,
+      height: 32,
+    },
+  )
+})
+
+test('repegSavedRecordImage keeps persisted content bounds stable while still reusing the cropped payload', async () => {
+  const { repegSavedRecordImage } = loadPegWindowManager()
+  let capturedOptions = null
+  let executedScript = ''
+  let croppedRect = null
+  const bitmap = createBgraBitmap(6, 6, (x, y) => {
+    if (x >= 2 && x <= 3 && y >= 2 && y <= 3) {
+      return [24, 24, 24, 255]
+    }
+
+    return [255, 255, 255, 255]
+  })
+  const utools = {
+    createBrowserWindow: (_url, options, callback) => {
+      capturedOptions = options
+      queueMicrotask(() => callback?.())
+      return {
+        id: 1011,
+        webContents: {
+          executeJavaScript: async (script) => {
+            executedScript = script
+            return true
+          },
+        },
+        show: () => {},
+        isDestroyed: () => false,
+      }
+    },
+  }
+  const electron = {
+    ipcRenderer: {
+      on: () => {},
+      off: () => {},
+    },
+    nativeImage: {
+      createFromDataURL: () => ({
+        getSize: () => ({ width: 6, height: 6 }),
+        toBitmap: () => bitmap,
+        crop: (rect) => {
+          croppedRect = rect
+          return {
+            toDataURL: () => 'data:image/png;base64,cropped-repeat-image',
+          }
+        },
+      }),
+    },
+  }
+
+  const result = await repegSavedRecordImage({
+    utools,
+    electron,
+    record: {
+      id: 'record-repeat',
+      lastPegBounds: { x: 120, y: 210, width: 80, height: 40 },
+    },
+    imageSrc: 'data:image/png;base64,source-image',
+    persistRecordPegState: async () => null,
+  })
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(result.bounds, { x: 120, y: 210, width: 80, height: 40 })
+  assert.deepEqual(croppedRect, { x: 2, y: 2, width: 2, height: 2 })
+  assert.match(executedScript, /cropped-repeat-image/)
   assert.deepEqual(
     {
       x: capturedOptions?.x,
@@ -216,12 +356,12 @@ test('pinTranslatedImage preprocesses white-edge images before opening the pin w
   )
 })
 
-test('repinSavedRecordImage restores and focuses an already pinned window', async () => {
+test('repegSavedRecordImage restores and focuses an already pegged window', async () => {
   const {
-    pinTranslatedImage,
-    attachPinnedRecord,
-    repinSavedRecordImage,
-  } = loadPinWindowManager()
+    pegTranslatedImage,
+    attachPeggedRecord,
+    repegSavedRecordImage,
+  } = loadPegWindowManager()
   const calls = []
   const windowInstance = {
     id: 1001,
@@ -251,7 +391,7 @@ test('repinSavedRecordImage restores and focuses an already pinned window', asyn
     },
   }
 
-  const openResult = await pinTranslatedImage({
+  const openResult = await pegTranslatedImage({
     utools,
     electron,
     imageSrc: 'data:image/png;base64,abc123',
@@ -259,26 +399,26 @@ test('repinSavedRecordImage restores and focuses an already pinned window', asyn
   })
 
   assert.equal(openResult.ok, true)
-  await attachPinnedRecord({
+  await attachPeggedRecord({
     windowId: openResult.windowId,
     recordId: 'record-1',
   })
 
   calls.length = 0
 
-  const repinResult = await repinSavedRecordImage({
+  const repegResult = await repegSavedRecordImage({
     utools,
     electron,
     record: {
       id: 'record-1',
-      lastPinBounds: { x: 10, y: 20, width: 120, height: 90 },
+      lastPegBounds: { x: 10, y: 20, width: 120, height: 90 },
     },
     imageSrc: 'file:///tmp/translated.png',
   })
 
-  assert.deepEqual(repinResult, {
+  assert.deepEqual(repegResult, {
     ok: true,
-    code: 'already-pinned',
+    code: 'already-pegged',
   })
   assert.deepEqual(calls, [
     'restore',
@@ -286,12 +426,12 @@ test('repinSavedRecordImage restores and focuses an already pinned window', asyn
     'setAlwaysOnTop',
     'moveTop',
     'focus',
-    'execute:window.__SCREEN_TRANSLATION_PIN_ATTENTION__?.()',
+    'execute:window.__SCREEN_TRANSLATION_PEG_ATTENTION__?.()',
   ])
 })
 
-test('pinTranslatedImage shrinks the window to the reported content bounds while keeping the outer border margin', async () => {
-  const { pinTranslatedImage } = loadPinWindowManager()
+test('pegTranslatedImage shrinks the window directly to the reported content bounds while keeping the frame thickness', async () => {
+  const { pegTranslatedImage } = loadPegWindowManager()
   const handlers = new Map()
   const geometryCalls = []
   const windowInstance = {
@@ -316,7 +456,7 @@ test('pinTranslatedImage shrinks the window to the reported content bounds while
     },
   }
 
-  const result = await pinTranslatedImage({
+  const result = await pegTranslatedImage({
     utools,
     electron,
     imageSrc: 'data:image/png;base64,abc123',
@@ -325,7 +465,7 @@ test('pinTranslatedImage shrinks the window to the reported content bounds while
 
   assert.equal(result.ok, true)
 
-  const handler = handlers.get(`screen-translation:pin:${result.windowId}`)
+  const handler = handlers.get(`screen-translation:peg:${result.windowId}`)
   await handler?.(null, {
     type: 'content-bounds',
     x: 16,
@@ -340,11 +480,11 @@ test('pinTranslatedImage shrinks the window to the reported content bounds while
   ])
 })
 
-test('pinTranslatedImage zooms around the pointer anchor and persists the resized content bounds on zoom end', async () => {
+test('pegTranslatedImage zooms around the pointer anchor and persists the resized content bounds on zoom end', async () => {
   const {
-    pinTranslatedImage,
-    attachPinnedRecord,
-  } = loadPinWindowManager()
+    pegTranslatedImage,
+    attachPeggedRecord,
+  } = loadPegWindowManager()
   const handlers = new Map()
   const geometryCalls = []
   const persistedBounds = []
@@ -370,22 +510,22 @@ test('pinTranslatedImage zooms around the pointer anchor and persists the resize
     },
   }
 
-  const result = await pinTranslatedImage({
+  const result = await pegTranslatedImage({
     utools,
     electron,
     imageSrc: 'data:image/png;base64,abc123',
     bounds: { x: 50, y: 60, width: 200, height: 100 },
-    persistRecordPinState: async (recordId, bounds) => {
+    persistRecordPegState: async (recordId, bounds) => {
       persistedBounds.push([recordId, bounds])
       return null
     },
   })
 
   assert.equal(result.ok, true)
-  await attachPinnedRecord({
+  await attachPeggedRecord({
     windowId: result.windowId,
     recordId: 'record-zoom',
-    persistRecordPinState: async (recordId, bounds) => {
+    persistRecordPegState: async (recordId, bounds) => {
       persistedBounds.push([recordId, bounds])
       return null
     },
@@ -394,7 +534,7 @@ test('pinTranslatedImage zooms around the pointer anchor and persists the resize
   geometryCalls.length = 0
   persistedBounds.length = 0
 
-  const handler = handlers.get(`screen-translation:pin:${result.windowId}`)
+  const handler = handlers.get(`screen-translation:peg:${result.windowId}`)
   await handler?.(null, {
     type: 'zoom',
     phase: 'live',
@@ -419,8 +559,8 @@ test('pinTranslatedImage zooms around the pointer anchor and persists the resize
   ])
 })
 
-test('pinTranslatedImage prefers a single setBounds update during live zoom when the runtime supports it', async () => {
-  const { pinTranslatedImage } = loadPinWindowManager()
+test('pegTranslatedImage prefers a single setBounds update during live zoom when the runtime supports it', async () => {
+  const { pegTranslatedImage } = loadPegWindowManager()
   const handlers = new Map()
   const geometryCalls = []
   const windowInstance = {
@@ -444,7 +584,7 @@ test('pinTranslatedImage prefers a single setBounds update during live zoom when
     },
   }
 
-  const result = await pinTranslatedImage({
+  const result = await pegTranslatedImage({
     utools,
     electron,
     imageSrc: 'data:image/png;base64,abc123',
@@ -453,7 +593,7 @@ test('pinTranslatedImage prefers a single setBounds update during live zoom when
 
   assert.equal(result.ok, true)
 
-  const handler = handlers.get(`screen-translation:pin:${result.windowId}`)
+  const handler = handlers.get(`screen-translation:peg:${result.windowId}`)
   await handler?.(null, {
     type: 'zoom',
     phase: 'live',
@@ -467,8 +607,8 @@ test('pinTranslatedImage prefers a single setBounds update during live zoom when
   ])
 })
 
-test('pinTranslatedImage focuses the pin window when the user clicks to start interacting with it', async () => {
-  const { pinTranslatedImage } = loadPinWindowManager()
+test('pegTranslatedImage focuses the peg window when the user clicks to start interacting with it', async () => {
+  const { pegTranslatedImage } = loadPegWindowManager()
   const handlers = new Map()
   const focusCalls = []
   const windowInstance = {
@@ -492,7 +632,7 @@ test('pinTranslatedImage focuses the pin window when the user clicks to start in
     },
   }
 
-  const result = await pinTranslatedImage({
+  const result = await pegTranslatedImage({
     utools,
     electron,
     imageSrc: 'data:image/png;base64,original-image',
@@ -500,7 +640,7 @@ test('pinTranslatedImage focuses the pin window when the user clicks to start in
   })
 
   assert.equal(result.ok, true)
-  const handler = handlers.get(`screen-translation:pin:${result.windowId}`)
+  const handler = handlers.get(`screen-translation:peg:${result.windowId}`)
   await handler?.(null, {
     type: 'drag-start',
     screenX: 100,

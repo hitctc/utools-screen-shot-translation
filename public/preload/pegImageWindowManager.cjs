@@ -1,15 +1,14 @@
-const activePinWindowsById = new Map()
-const activePinWindowIdByRecordId = new Map()
+const activePegWindowsById = new Map()
+const activePegWindowIdByRecordId = new Map()
 const {
   removeEdgeNearWhitePixels,
   findVisibleContentBounds,
   scaleContentBoundsToTarget,
-} = require('./pinImageMask.cjs')
-// 这里给外围蓝色描边预留固定空间，保证边框画在图片外侧而不压住内容。
-const PIN_WINDOW_SHADOW_MARGIN = 6
-const PIN_WINDOW_DEFAULT_MARGIN = 24
-const MIN_PIN_CONTENT_SHORT_EDGE = 80
-const MAX_PIN_CONTENT_LONG_EDGE = 4096
+} = require('./pegImageMask.cjs')
+// 蓝框本身占用独立厚度，窗口几何需要把这层边框也算进去，避免图片内容被边框吃掉。
+const PEG_WINDOW_FRAME_MARGIN = 6
+const MIN_PEG_CONTENT_SHORT_EDGE = 80
+const MAX_PEG_CONTENT_LONG_EDGE = 4096
 
 function loadElectronModule(explicitElectron) {
   if (explicitElectron && typeof explicitElectron === 'object') {
@@ -23,7 +22,7 @@ function loadElectronModule(explicitElectron) {
   }
 }
 
-function normalizePinBounds(bounds) {
+function normalizePegBounds(bounds) {
   const candidate = bounds && typeof bounds === 'object' ? bounds : {}
   const x = Math.round(Number(candidate.x))
   const y = Math.round(Number(candidate.y))
@@ -37,6 +36,30 @@ function normalizePinBounds(bounds) {
   return { x, y, width, height }
 }
 
+function normalizeDisplayMetrics(display) {
+  const candidate = display && typeof display === 'object' ? display : {}
+  const bounds = normalizePegBounds(
+    candidate.bounds
+      ? {
+          x: candidate.bounds.x,
+          y: candidate.bounds.y,
+          width: candidate.bounds.width,
+          height: candidate.bounds.height,
+        }
+      : null,
+  )
+  const scaleFactor = Number(candidate.scaleFactor)
+
+  if (!bounds) {
+    return null
+  }
+
+  return {
+    bounds,
+    scaleFactor: Number.isFinite(scaleFactor) && scaleFactor > 0 ? scaleFactor : 1,
+  }
+}
+
 function resolveImageSize(imageSrc, electron) {
   const nativeImage = loadElectronModule(electron)?.nativeImage
   const normalizedImageSrc = typeof imageSrc === 'string' ? imageSrc.trim() : ''
@@ -47,7 +70,7 @@ function resolveImageSize(imageSrc, electron) {
 
   try {
     const image = nativeImage.createFromDataURL(normalizedImageSrc)
-    return normalizePinBounds({
+    return normalizePegBounds({
       x: 0,
       y: 0,
       width: image?.getSize?.()?.width,
@@ -58,34 +81,29 @@ function resolveImageSize(imageSrc, electron) {
   }
 }
 
-// 主流程不再依赖截图选区坐标，没有历史位置时统一落到当前屏幕右上角。
-function resolveDefaultPinBounds({ utools, imageSrc, electron }) {
+// 主流程不再依赖截图选区坐标，没有历史位置时统一把可见内容贴到当前屏幕左上角。
+function resolveDefaultPegBounds({ utools, imageSrc, electron }) {
   const imageSize = resolveImageSize(imageSrc, electron)
   const display =
     typeof utools?.getDisplayNearestPoint === 'function' && typeof utools?.getCursorScreenPoint === 'function'
       ? utools.getDisplayNearestPoint(utools.getCursorScreenPoint())
       : null
-  const displayBounds = display?.bounds
-  const normalizedDisplayBounds = normalizePinBounds(
-    displayBounds
-      ? {
-          x: displayBounds.x,
-          y: displayBounds.y,
-          width: displayBounds.width,
-          height: displayBounds.height,
-        }
-      : null,
-  )
+  const normalizedDisplay = normalizeDisplayMetrics(display)
+  const normalizedDisplayBounds = normalizedDisplay?.bounds
+  const displayScaleFactor = normalizedDisplay?.scaleFactor || 1
 
   if (!imageSize || !normalizedDisplayBounds) {
     return null
   }
 
+  const logicalWidth = Math.max(1, Math.round(imageSize.width / displayScaleFactor))
+  const logicalHeight = Math.max(1, Math.round(imageSize.height / displayScaleFactor))
+
   return {
-    x: normalizedDisplayBounds.x + normalizedDisplayBounds.width - imageSize.width - PIN_WINDOW_DEFAULT_MARGIN,
-    y: normalizedDisplayBounds.y + PIN_WINDOW_DEFAULT_MARGIN,
-    width: imageSize.width,
-    height: imageSize.height,
+    x: normalizedDisplayBounds.x + PEG_WINDOW_FRAME_MARGIN,
+    y: normalizedDisplayBounds.y + PEG_WINDOW_FRAME_MARGIN,
+    width: logicalWidth,
+    height: logicalHeight,
   }
 }
 
@@ -123,11 +141,11 @@ function normalizeAnchorRatio(value) {
   return clampNumber(ratio, 0, 1)
 }
 
-// 钉住图的首帧如果直接带着整张白底，会让用户误以为又弹出一个空白主窗口。
-// 这里在 preload 里先按像素清理边缘浅底并裁切内容，再把更紧凑的位图交给 pin window。
-function preparePinWindowPayload({ imageSrc, bounds, electron }) {
+// 钉图的首帧如果直接带着整张白底，会让用户误以为又弹出一个空白主窗口。
+// 这里在 preload 里先按像素清理边缘浅底并裁切内容，再把更紧凑的位图交给 peg window。
+function preparePegWindowPayload({ imageSrc, bounds, electron, preserveBounds = false }) {
   const nativeImage = loadElectronModule(electron)?.nativeImage
-  const normalizedBounds = normalizePinBounds(bounds)
+  const normalizedBounds = normalizePegBounds(bounds)
   const normalizedImageSrc = typeof imageSrc === 'string' ? imageSrc.trim() : ''
 
   if (
@@ -187,18 +205,22 @@ function preparePinWindowPayload({ imageSrc, bounds, electron }) {
       }
     }
 
-    const projectedBounds = scaleContentBoundsToTarget({
-      sourceWidth,
-      sourceHeight,
-      targetWidth: normalizedBounds.width,
-      targetHeight: normalizedBounds.height,
-      bounds: contentBounds,
-    })
-    const nextContentBounds = normalizePinBounds(
+    // 重复钉图带进来的 lastPegBounds 已经是上次裁切后的真实内容区尺寸，
+    // 这里只继续复用裁切后的图片，不能再按原图比例把 bounds 缩一次。
+    const projectedBounds = preserveBounds
+      ? normalizedBounds
+      : scaleContentBoundsToTarget({
+          sourceWidth,
+          sourceHeight,
+          targetWidth: normalizedBounds.width,
+          targetHeight: normalizedBounds.height,
+          bounds: contentBounds,
+        })
+    const nextContentBounds = normalizePegBounds(
       projectedBounds
         ? {
-            x: normalizedBounds.x + projectedBounds.x,
-            y: normalizedBounds.y + projectedBounds.y,
+            x: preserveBounds ? normalizedBounds.x : normalizedBounds.x + projectedBounds.x,
+            y: preserveBounds ? normalizedBounds.y : normalizedBounds.y + projectedBounds.y,
             width: projectedBounds.width,
             height: projectedBounds.height,
           }
@@ -226,39 +248,41 @@ function preparePinWindowPayload({ imageSrc, bounds, electron }) {
   }
 }
 
+// 窗口外层现在就是可见蓝框本体，所以要把边框厚度一起包进窗口几何。
 function toWindowBounds(contentBounds) {
-  const bounds = normalizePinBounds(contentBounds)
+  const bounds = normalizePegBounds(contentBounds)
 
   if (!bounds) {
     return null
   }
 
   return {
-    x: bounds.x - PIN_WINDOW_SHADOW_MARGIN,
-    y: bounds.y - PIN_WINDOW_SHADOW_MARGIN,
-    width: bounds.width + PIN_WINDOW_SHADOW_MARGIN * 2,
-    height: bounds.height + PIN_WINDOW_SHADOW_MARGIN * 2,
+    x: bounds.x - PEG_WINDOW_FRAME_MARGIN,
+    y: bounds.y - PEG_WINDOW_FRAME_MARGIN,
+    width: bounds.width + PEG_WINDOW_FRAME_MARGIN * 2,
+    height: bounds.height + PEG_WINDOW_FRAME_MARGIN * 2,
   }
 }
 
+// 持久化仍只记图片内容区，不把外层蓝框厚度写回记录。
 function toContentBounds(windowBounds) {
-  const bounds = normalizePinBounds(windowBounds)
+  const bounds = normalizePegBounds(windowBounds)
 
   if (!bounds) {
     return null
   }
 
   return {
-    x: bounds.x + PIN_WINDOW_SHADOW_MARGIN,
-    y: bounds.y + PIN_WINDOW_SHADOW_MARGIN,
-    width: Math.max(1, bounds.width - PIN_WINDOW_SHADOW_MARGIN * 2),
-    height: Math.max(1, bounds.height - PIN_WINDOW_SHADOW_MARGIN * 2),
+    x: bounds.x + PEG_WINDOW_FRAME_MARGIN,
+    y: bounds.y + PEG_WINDOW_FRAME_MARGIN,
+    width: Math.max(1, bounds.width - PEG_WINDOW_FRAME_MARGIN * 2),
+    height: Math.max(1, bounds.height - PEG_WINDOW_FRAME_MARGIN * 2),
   }
 }
 
-// 缩放直接改真实内容区几何，后续继续复用 lastPinBounds 持久化，不单独维护 scale 状态。
+// 缩放直接改真实内容区几何，后续继续复用 lastPegBounds 持久化，不单独维护 scale 状态。
 function scaleContentBounds(currentContentBounds, payload = {}) {
-  const bounds = normalizePinBounds(currentContentBounds)
+  const bounds = normalizePegBounds(currentContentBounds)
   const scaleFactor = Number(payload.scaleFactor)
 
   if (!bounds || !Number.isFinite(scaleFactor) || scaleFactor <= 0) {
@@ -269,15 +293,15 @@ function scaleContentBounds(currentContentBounds, payload = {}) {
   const longEdge = Math.max(bounds.width, bounds.height)
   const appliedScale = clampNumber(
     scaleFactor,
-    MIN_PIN_CONTENT_SHORT_EDGE / shortEdge,
-    MAX_PIN_CONTENT_LONG_EDGE / longEdge,
+    MIN_PEG_CONTENT_SHORT_EDGE / shortEdge,
+    MAX_PEG_CONTENT_LONG_EDGE / longEdge,
   )
   const anchorRatioX = normalizeAnchorRatio(payload.anchorRatioX)
   const anchorRatioY = normalizeAnchorRatio(payload.anchorRatioY)
   const nextWidth = Math.max(1, Math.round(bounds.width * appliedScale))
   const nextHeight = Math.max(1, Math.round(bounds.height * appliedScale))
 
-  return normalizePinBounds({
+  return normalizePegBounds({
     x: Math.round(bounds.x + anchorRatioX * (bounds.width - nextWidth)),
     y: Math.round(bounds.y + anchorRatioY * (bounds.height - nextHeight)),
     width: nextWidth,
@@ -300,20 +324,20 @@ function closeWindow(windowInstance) {
 }
 
 function getActiveEntryByRecordId(recordId) {
-  const windowId = activePinWindowIdByRecordId.get(recordId)
+  const windowId = activePegWindowIdByRecordId.get(recordId)
   if (!windowId) {
     return null
   }
 
-  const entry = activePinWindowsById.get(windowId)
+  const entry = activePegWindowsById.get(windowId)
   if (!entry) {
-    activePinWindowIdByRecordId.delete(recordId)
+    activePegWindowIdByRecordId.delete(recordId)
     return null
   }
 
   if (entry.windowInstance?.isDestroyed?.()) {
-    activePinWindowsById.delete(windowId)
-    activePinWindowIdByRecordId.delete(recordId)
+    activePegWindowsById.delete(windowId)
+    activePegWindowIdByRecordId.delete(recordId)
     return null
   }
 
@@ -321,18 +345,18 @@ function getActiveEntryByRecordId(recordId) {
 }
 
 async function persistEntryBounds(entry, explicitBounds) {
-  if (!entry || !entry.recordId || typeof entry.persistRecordPinState !== 'function') {
+  if (!entry || !entry.recordId || typeof entry.persistRecordPegState !== 'function') {
     return
   }
 
-  const windowBounds = normalizePinBounds(explicitBounds || entry.bounds)
+  const windowBounds = normalizePegBounds(explicitBounds || entry.bounds)
   const contentBounds = toContentBounds(windowBounds)
 
   if (!windowBounds || !contentBounds) {
     return
   }
 
-  await entry.persistRecordPinState(entry.recordId, contentBounds)
+  await entry.persistRecordPegState(entry.recordId, contentBounds)
   entry.bounds = windowBounds
 }
 
@@ -341,9 +365,9 @@ function cleanupEntry(entry, ipcRenderer) {
     return
   }
 
-  activePinWindowsById.delete(entry.windowId)
+  activePegWindowsById.delete(entry.windowId)
   if (entry.recordId) {
-    activePinWindowIdByRecordId.delete(entry.recordId)
+    activePegWindowIdByRecordId.delete(entry.recordId)
   }
   if (entry.channel && ipcRenderer?.off && entry.handleMessage) {
     ipcRenderer.off(entry.channel, entry.handleMessage)
@@ -351,7 +375,7 @@ function cleanupEntry(entry, ipcRenderer) {
 }
 
 function normalizeRelativeContentBounds(payload) {
-  const bounds = normalizePinBounds(payload)
+  const bounds = normalizePegBounds(payload)
 
   if (!bounds) {
     return null
@@ -362,7 +386,7 @@ function normalizeRelativeContentBounds(payload) {
 
 // 缩放和内容区收缩优先走一次 setBounds，减少 setPosition + setSize 拆开带来的窗口抖动。
 function applyWindowBounds(windowInstance, nextBounds) {
-  const bounds = normalizePinBounds(nextBounds)
+  const bounds = normalizePegBounds(nextBounds)
 
   if (!windowInstance || !bounds) {
     return
@@ -377,13 +401,13 @@ function applyWindowBounds(windowInstance, nextBounds) {
   windowInstance.setSize?.(bounds.width, bounds.height)
 }
 
-function buildPinWindowEntry({
+function buildPegWindowEntry({
   windowInstance,
   windowId,
   channel,
   initialBounds,
   ipcRenderer,
-  persistRecordPinState,
+  persistRecordPegState,
 }) {
   const entry = {
     windowInstance,
@@ -391,9 +415,9 @@ function buildPinWindowEntry({
     channel,
     ipcRenderer,
     recordId: '',
-    bounds: normalizePinBounds(initialBounds),
+    bounds: normalizePegBounds(initialBounds),
     dragState: null,
-    persistRecordPinState,
+    persistRecordPegState,
     handleMessage: null,
   }
 
@@ -420,7 +444,7 @@ function buildPinWindowEntry({
         return
       }
 
-      const nextBounds = normalizePinBounds({
+      const nextBounds = normalizePegBounds({
         x: entry.dragState.bounds.x + (currentScreenX - entry.dragState.screenX),
         y: entry.dragState.bounds.y + (currentScreenY - entry.dragState.screenY),
         width: entry.dragState.bounds.width,
@@ -453,7 +477,7 @@ function buildPinWindowEntry({
         return
       }
 
-      const nextContentBounds = normalizePinBounds({
+      const nextContentBounds = normalizePegBounds({
         x: currentContentBounds.x + relativeContentBounds.x,
         y: currentContentBounds.y + relativeContentBounds.y,
         width: relativeContentBounds.width,
@@ -513,28 +537,30 @@ function buildPinWindowEntry({
   }
 
   ipcRenderer.on(channel, entry.handleMessage)
-  activePinWindowsById.set(windowId, entry)
+  activePegWindowsById.set(windowId, entry)
   return entry
 }
 
-function openPinWindow({
+function openPegWindow({
   utools,
   electron,
   resolveAssetUrl = (assetPath) => assetPath,
   imageSrc,
   bounds,
-  persistRecordPinState,
+  persistRecordPegState,
+  preserveBoundsOnPreprocess = false,
 }) {
   const runtime = utools && typeof utools === 'object' ? utools : null
   const ipcRenderer = loadElectronModule(electron)?.ipcRenderer
   const effectiveBounds =
-    normalizePinBounds(bounds) || resolveDefaultPinBounds({ utools: runtime, imageSrc, electron })
-  const preparedPayload = preparePinWindowPayload({
+    normalizePegBounds(bounds) || resolveDefaultPegBounds({ utools: runtime, imageSrc, electron })
+  const preparedPayload = preparePegWindowPayload({
     imageSrc,
     bounds: effectiveBounds,
     electron,
+    preserveBounds: preserveBoundsOnPreprocess,
   })
-  const normalizedBounds = normalizePinBounds(preparedPayload.bounds)
+  const normalizedBounds = normalizePegBounds(preparedPayload.bounds)
   const windowBounds = toWindowBounds(preparedPayload.bounds)
   const normalizedImageSrc = typeof preparedPayload.imageSrc === 'string' ? preparedPayload.imageSrc.trim() : ''
 
@@ -548,11 +574,11 @@ function openPinWindow({
     !windowBounds ||
     !normalizedImageSrc
   ) {
-    return Promise.resolve({ ok: false, code: 'pin-failed' })
+    return Promise.resolve({ ok: false, code: 'peg-failed' })
   }
 
   return new Promise((resolve) => {
-    let pinWindow = null
+    let pegWindow = null
     let channel = ''
     let settled = false
 
@@ -565,8 +591,8 @@ function openPinWindow({
       resolve(result)
     }
 
-    pinWindow = runtime.createBrowserWindow(
-      resolveAssetUrl('pin-window.html'),
+    pegWindow = runtime.createBrowserWindow(
+      resolveAssetUrl('peg-window.html'),
       {
         x: windowBounds.x,
         y: windowBounds.y,
@@ -591,75 +617,75 @@ function openPinWindow({
       },
       async () => {
         try {
-          await pinWindow.webContents.executeJavaScript(
-            `window.__SCREEN_TRANSLATION_PIN_INIT__(${JSON.stringify({
+          await pegWindow.webContents.executeJavaScript(
+            `window.__SCREEN_TRANSLATION_PEG_INIT__(${JSON.stringify({
               channel,
-              frameInset: PIN_WINDOW_SHADOW_MARGIN,
+              frameInset: PEG_WINDOW_FRAME_MARGIN,
               imageSrc: normalizedImageSrc,
             })})`,
             true,
           )
-          pinWindow?.show?.()
+          pegWindow?.show?.()
           settle({
             ok: true,
-            windowId: pinWindow.id,
+            windowId: pegWindow.id,
             bounds: normalizedBounds,
           })
         } catch {
-          cleanupEntry(activePinWindowsById.get(pinWindow?.id), ipcRenderer)
-          closeWindow(pinWindow)
-          settle({ ok: false, code: 'pin-failed' })
+          cleanupEntry(activePegWindowsById.get(pegWindow?.id), ipcRenderer)
+          closeWindow(pegWindow)
+          settle({ ok: false, code: 'peg-failed' })
         }
       },
     )
 
-    if (!pinWindow || typeof pinWindow.id !== 'number') {
-      settle({ ok: false, code: 'pin-failed' })
+    if (!pegWindow || typeof pegWindow.id !== 'number') {
+      settle({ ok: false, code: 'peg-failed' })
       return
     }
 
-    channel = `screen-translation:pin:${pinWindow.id}`
-    buildPinWindowEntry({
-      windowInstance: pinWindow,
-      windowId: pinWindow.id,
+    channel = `screen-translation:peg:${pegWindow.id}`
+    buildPegWindowEntry({
+      windowInstance: pegWindow,
+      windowId: pegWindow.id,
       channel,
       initialBounds: windowBounds,
       ipcRenderer,
-      persistRecordPinState,
+      persistRecordPegState,
     })
   })
 }
 
-// 主流程 pin 成功后，保存记录才会生成 recordId，这一步把活动窗口补上正式关联关系。
-async function attachPinnedRecord({
+// 主流程 peg 成功后，保存记录才会生成 recordId，这一步把活动窗口补上正式关联关系。
+async function attachPeggedRecord({
   windowId,
   recordId,
-  persistRecordPinState,
+  persistRecordPegState,
 }) {
-  const entry = activePinWindowsById.get(windowId)
+  const entry = activePegWindowsById.get(windowId)
   if (!entry || !recordId) {
-    return { ok: false, code: 'pin-failed' }
+    return { ok: false, code: 'peg-failed' }
   }
 
   entry.recordId = recordId
-  entry.persistRecordPinState = persistRecordPinState
-  activePinWindowIdByRecordId.set(recordId, windowId)
+  entry.persistRecordPegState = persistRecordPegState
+  activePegWindowIdByRecordId.set(recordId, windowId)
   await persistEntryBounds(entry)
 
   return { ok: true, windowId, recordId }
 }
 
-// 记录页重钉前先查活动窗口，避免同一张图被重复创建多个钉住实例。
-async function repinSavedRecordImage({
+// 记录页重钉图前先查活动窗口，避免同一张图被重复创建多个钉图实例。
+async function repegSavedRecordImage({
   utools,
   electron,
   resolveAssetUrl = (assetPath) => assetPath,
   record,
   imageSrc,
-  persistRecordPinState,
+  persistRecordPegState,
 }) {
   if (!record || typeof record.id !== 'string') {
-    return { ok: false, code: 'repin-failed' }
+    return { ok: false, code: 'repeg-failed' }
   }
 
   const activeEntry = getActiveEntryByRecordId(record.id)
@@ -671,40 +697,41 @@ async function repinSavedRecordImage({
       activeEntry.windowInstance?.moveTop?.()
       activeEntry.windowInstance?.focus?.()
       await activeEntry.windowInstance?.webContents?.executeJavaScript?.(
-        'window.__SCREEN_TRANSLATION_PIN_ATTENTION__?.()',
+        'window.__SCREEN_TRANSLATION_PEG_ATTENTION__?.()',
         true,
       )
     } catch {
-      // 已钉住提醒只影响体验，不阻塞主流程。
+      // 已钉图提醒只影响体验，不阻塞主流程。
     }
 
-    return { ok: true, code: 'already-pinned' }
+    return { ok: true, code: 'already-pegged' }
   }
 
-  const result = await openPinWindow({
+  const result = await openPegWindow({
     utools,
     electron,
     resolveAssetUrl,
     imageSrc,
-    bounds: record.lastPinBounds,
-    persistRecordPinState,
+    bounds: record.lastPegBounds,
+    persistRecordPegState,
+    preserveBoundsOnPreprocess: normalizePegBounds(record.lastPegBounds) !== null,
   })
 
   if (!result.ok) {
-    return { ok: false, code: 'repin-failed' }
+    return { ok: false, code: 'repeg-failed' }
   }
 
-  await attachPinnedRecord({
+  await attachPeggedRecord({
     windowId: result.windowId,
     recordId: record.id,
-    persistRecordPinState,
+    persistRecordPegState,
   })
 
   return result
 }
 
 module.exports = {
-  pinTranslatedImage: openPinWindow,
-  attachPinnedRecord,
-  repinSavedRecordImage,
+  pegTranslatedImage: openPegWindow,
+  attachPeggedRecord,
+  repegSavedRecordImage,
 }

@@ -15,7 +15,7 @@ const {
   deleteSavedRecord,
   getSavedRecord,
   saveTranslatedRecord,
-  updateSavedRecordPinState,
+  updateSavedRecordPegState,
 } = require('../../public/preload/recordStore.cjs')
 
 function createFsMock({
@@ -282,8 +282,8 @@ test('getSavedRecord returns the reconciled record by id', async () => {
               id: 'record-1',
               imageFilename: 'translated.png',
               createdAt: '2026-04-10T10:00:00.000Z',
-              lastPinnedAt: '2026-04-10T10:10:00.000Z',
-              lastPinBounds: { x: 10, y: 20, width: 120, height: 80 },
+              lastPeggedAt: '2026-04-10T10:10:00.000Z',
+              lastPegBounds: { x: 10, y: 20, width: 120, height: 80 },
             },
           ],
         }),
@@ -304,8 +304,8 @@ test('getSavedRecord returns the reconciled record by id', async () => {
     id: 'record-1',
     imageFilename: 'translated.png',
     createdAt: '2026-04-10T10:00:00.000Z',
-    lastPinnedAt: '2026-04-10T10:10:00.000Z',
-    lastPinBounds: { x: 10, y: 20, width: 120, height: 80 },
+    lastPeggedAt: '2026-04-10T10:10:00.000Z',
+    lastPegBounds: { x: 10, y: 20, width: 120, height: 80 },
   })
 })
 
@@ -330,8 +330,8 @@ test('saveTranslatedRecord writes the translated image and appends a manifest en
   assert.equal(result.record.id, 'record-1')
   assert.equal(result.record.imageFilename, 'screen-translation-20260411-020304-000-record-1.png')
   assert.equal(result.record.createdAt, '2026-04-11T02:03:04.000Z')
-  assert.equal(result.record.lastPinnedAt, '2026-04-11T02:03:04.000Z')
-  assert.deepEqual(result.record.lastPinBounds, { x: 16, y: 24, width: 180, height: 96 })
+  assert.equal(result.record.lastPeggedAt, '2026-04-11T02:03:04.000Z')
+  assert.deepEqual(result.record.lastPegBounds, { x: 16, y: 24, width: 180, height: 96 })
   assert.equal(writes.length, 2)
   assert.equal(writes[0].filePath, '/tmp/save/screen-translation-20260411-020304-000-record-1.png')
   assert.equal(Buffer.from(writes[0].contents).equals(Buffer.from('hello')), true)
@@ -341,7 +341,7 @@ test('saveTranslatedRecord writes the translated image and appends a manifest en
   assert.deepEqual(manifest.records, [result.record])
 })
 
-test('updateSavedRecordPinState rewrites last pin metadata for the target record', async () => {
+test('updateSavedRecordPegState rewrites last peg metadata for the target record', async () => {
   const manifestPath = path.join('/tmp/save', getManifestFilename())
   const { fs, writes } = createFsMock({
     manifestByPath: new Map([
@@ -355,8 +355,8 @@ test('updateSavedRecordPinState rewrites last pin metadata for the target record
               id: 'record-1',
               imageFilename: 'translated.png',
               createdAt: '2026-04-10T10:00:00.000Z',
-              lastPinnedAt: '2026-04-10T10:10:00.000Z',
-              lastPinBounds: { x: 10, y: 20, width: 120, height: 80 },
+              lastPeggedAt: '2026-04-10T10:10:00.000Z',
+              lastPegBounds: { x: 10, y: 20, width: 120, height: 80 },
             },
           ],
         }),
@@ -366,7 +366,7 @@ test('updateSavedRecordPinState rewrites last pin metadata for the target record
     existingPaths: new Set(['/tmp/save', '/tmp/save/translated.png']),
   })
 
-  const result = await updateSavedRecordPinState({
+  const result = await updateSavedRecordPegState({
     fs,
     path,
     settings: { saveDirectory: '/tmp/save' },
@@ -379,8 +379,8 @@ test('updateSavedRecordPinState rewrites last pin metadata for the target record
     id: 'record-1',
     imageFilename: 'translated.png',
     createdAt: '2026-04-10T10:00:00.000Z',
-    lastPinnedAt: '2026-04-11T05:06:07.000Z',
-    lastPinBounds: { x: 40, y: 60, width: 140, height: 90 },
+    lastPeggedAt: '2026-04-11T05:06:07.000Z',
+    lastPegBounds: { x: 40, y: 60, width: 140, height: 90 },
   })
   assert.equal(writes.length, 1)
   const manifest = JSON.parse(String(writes[0].contents))

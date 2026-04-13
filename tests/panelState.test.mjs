@@ -26,7 +26,8 @@ test('panel state helpers format theme status and normalize records columns like
 
   assert.equal(panelState.formatThemeStatus('system', true), '跟随系统 / 深色')
   assert.equal(panelState.formatThemeStatus('light', false), '浅色')
-  assert.equal(panelState.normalizeUiSettings({ recordsColumnCount: 9 }).recordsColumnCount, 3)
+  assert.equal(panelState.normalizeUiSettings({}).recordsColumnCount, 4)
+  assert.equal(panelState.normalizeUiSettings({ recordsColumnCount: 9 }).recordsColumnCount, 4)
 })
 
 test('panel state helpers map saved records and split them into visual columns', () => {

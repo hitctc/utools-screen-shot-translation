@@ -170,7 +170,7 @@ async function captureStableDisplayImageDataUrl({
   return previousImageDataUrl
 }
 
-// 自定义截图只负责拉起全屏选区并把图片与原始坐标带回主流程，不处理翻译和钉住。
+// 自定义截图只负责拉起全屏选区并把图片与原始坐标带回主流程，不处理翻译和钉图。
 function captureImageWithCustomOverlay({
   utools,
   electron,
